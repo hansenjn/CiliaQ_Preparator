@@ -1,7 +1,7 @@
 # CiliaQ_Preparator
 An ImageJ plugin to prepare images for analysis using [CiliaQ](https://github.com/hansenjn/CiliaQ).
 
-CiliaQ_Preparator implements offers the segmentation method "CANNY 3D". This function was implemented based on code from the ImageJ plugin [canny3d-thresholder](https://github.com/sRassmann/canny3d-thresholder)
+CiliaQ_Preparator implements offers the segmentation method "CANNY 3D". This function was implemented based on code from the ImageJ plugin [canny3d-thresholder](https://github.com/sRassmann/canny3d-thresholder).
 
 Copyright (C) 2019-2020: Jan N. Hansen. CiliaQ_Preparator has been developed in the research group [Biophysical Imaging, Institute of Innate Immunity, Bonn, Germany](http://www.iii.uni-bonn.de/en/wachten_lab/) with contributions from [Sebastian Raßmann](https://github.com/sRassmann).
 
