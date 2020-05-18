@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.0.3
+* CiliaQ_Preparator Version 0.0.4
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: May 14, 2020)
+* Date: September 29, 2019 (This Version: May 18, 2020)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -38,7 +38,7 @@ import ij.process.AutoThresholder.Method;
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.0.3";
+	static final String PLUGINVERSION = "0.0.4";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -111,8 +111,8 @@ public void run(String arg) {
 	//.setInsets(top, left, bottom)
 	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
 	gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
-	gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats.", InstructionsFont);
-	gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is installed in FIJI or can be manually installed into imagej.", InstructionsFont);
+	gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats. "
+								+ "The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
 	
 	gd.setInsets(10,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
 	gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
@@ -513,15 +513,20 @@ public void run(String arg) {
 			   					for(int f = 0; f < procImp.getNFrames(); f++){
 			   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 				   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
-				   					if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
-				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+				   					try{
+				   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
+					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+					   							+  " T" + (f+1) + "/" + procImp.getNFrames();
+					   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 				   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-				   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+					   					}else{
+					   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+					   					}
+				   					}catch(Exception e){
 				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 			   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-				   					}else{
-				   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
-				   					}
+				   					}				   					
 				   					tempImp.getStack().setSliceLabel("segm " + copyStr, indexNew+1);
 			   					}
 							}
@@ -536,15 +541,20 @@ public void run(String arg) {
    				   					for(int f = 0; f < procImp.getNFrames(); f++){
 	   				   					indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 					   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
-					   					if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
-					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+					   					try{
+					   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
+						   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+						   							+  " T" + (f+1) + "/" + procImp.getNFrames();
+						   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+						   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 					   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-					   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+						   					}else{
+						   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+						   					}
+					   					}catch(Exception e){
 					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 				   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-					   					}else{
-					   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
-					   					}
+					   					}					   					
 					   					tempImp.getStack().setSliceLabel(copyStr, indexNew+1);
    				   					}
    								}   								
@@ -556,15 +566,20 @@ public void run(String arg) {
 		   					for(int f = 0; f < procImp.getNFrames(); f++){
 		   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 			   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
-			   					if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
-			   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+			   					try{
+			   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
+				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+				   							+  " T" + (f+1) + "/" + procImp.getNFrames();
+				   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 			   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-			   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+				   					}else{
+				   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+				   					}
+			   					}catch(Exception e){
 			   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 		   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-			   					}else{
-			   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
-			   					}
+			   					}			   					
 			   					tempImp.getStack().setSliceLabel(copyStr, indexNew+1);
 		   					}
 						}
