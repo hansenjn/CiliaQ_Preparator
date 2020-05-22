@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.0.4
+* CiliaQ_Preparator Version 0.0.5
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: May 18, 2020)
+* Date: September 29, 2019 (This Version: May 22, 2020)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -38,7 +38,7 @@ import ij.process.AutoThresholder.Method;
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.0.4";
+	static final String PLUGINVERSION = "0.0.5";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -404,7 +404,6 @@ public void run(String arg) {
 			
 			//processing
 			int addC = 0;
-			int indexProc, indexTemp;
 		   	for(int c = 0; c < segmentChannels.length; c++){
 		   		if(segmentChannels [c]){
 		   			if(includeDuplicateChannel [c]){
@@ -423,7 +422,7 @@ public void run(String arg) {
 		   			if(chosenAlgorithms [c].equals("CANNY 3D")){
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with CANNY 3D ...");
 		   				
-		   				segmentUsingCanny3D(tempImp, progress, cannySettings [c], procImp, c); 				
+		   				segmentUsingCanny3D(tempImp, progress, cannySettings [c], procImp, channelIDs [c]); 				
 		   							
 			   			tempImp.changes = false;
 			   			tempImp.close();
@@ -718,7 +717,7 @@ private double [] getThresholds (ImagePlus imp, String chosenMethod, String chos
 private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, ProcessSettings settings, ImagePlus writeImp, int channelWriteImp){
 	ImagePlus selectedImp;
 	int indexSelected, indexWriteImp;
-	double maxValue = Math.pow(2.0, channelImp.getBitDepth()) - 1;
+	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
 	for(int t = 0; t < channelImp.getNFrames(); t++){
 		/*
 		 * Extract single time point and 
@@ -731,17 +730,15 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, 
 		 * For details see ciliaQ_Prep_jnh.canny3d_thresholder.Processing
 		 * */			
 		selectedImp = ciliaQ_Prep_jnh.canny3d_thresholder.Processing.doProcessing(selectedImp, settings, progress);
-//		selectedImp.show();
-//		new WaitForUserDialog("check").show();
-//		selectedImp.hide();
+		
 		/*
 		 * Write back to image
-		 * */
-		for(int s = 0; s < channelImp.getNSlices(); s++){
+		 * */		
+		for(int s = 0; s < selectedImp.getNSlices(); s++){
 			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
 			indexWriteImp = writeImp.getStackIndex(channelWriteImp+1, s+1, t+1)-1;
-			for(int x = 0; x < channelImp.getWidth(); x++){
-				for(int y = 0; y < channelImp.getHeight(); y++){
+			for(int x = 0; x < selectedImp.getWidth(); x++){
+				for(int y = 0; y < selectedImp.getHeight(); y++){
 					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
 						writeImp.getStack().setVoxel(x, y, indexWriteImp, 0.0);
 					}else if(!keepIntensities){
