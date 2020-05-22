@@ -736,7 +736,7 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, 
 		 * */		
 		for(int s = 0; s < selectedImp.getNSlices(); s++){
 			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
-			indexWriteImp = writeImp.getStackIndex(channelWriteImp+1, s+1, t+1)-1;
+			indexWriteImp = writeImp.getStackIndex(channelWriteImp, s+1, t+1)-1;
 			for(int x = 0; x < selectedImp.getWidth(); x++){
 				for(int y = 0; y < selectedImp.getHeight(); y++){
 					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
