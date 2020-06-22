@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.0.5
+* CiliaQ_Preparator Version 0.0.6
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -14,13 +14,14 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: May 22, 2020)
+* Date: September 29, 2019 (This Version: June 22, 2020)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
 
 import java.awt.*;
 import java.awt.event.*;
+import java.io.IOException;
 import java.util.*;
 import java.text.*;
 import javax.swing.UIManager;
@@ -33,12 +34,15 @@ import ij.measure.*;
 import ij.plugin.*;
 import ij.process.LUT;
 import ij.text.*;
+import loci.formats.FormatException;
+import loci.plugins.BF;
+import loci.plugins.in.ImporterOptions;
 import ij.process.AutoThresholder.Method;
 
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.0.5";
+	static final String PLUGINVERSION = "0.0.6";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -106,7 +110,7 @@ public void run(String arg) {
 //-------------------------GenericDialog--------------------------------------
 //&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 	
-	GenericDialog gd = new GenericDialog(PLUGINNAME + " - set parameters");	
+	GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters");	
 	//show Dialog-----------------------------------------------------------------
 	//.setInsets(top, left, bottom)
 	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
@@ -304,21 +308,92 @@ public void run(String arg) {
 					
 		}
 	}
-	 	
-	//add progressDialog
-	progress = new ProgressDialog(name, tasks);
-	progress.setLocation(0,0);
-	progress.setVisible(true);
-	progress.addWindowListener(new java.awt.event.WindowAdapter() {
-        public void windowClosing(WindowEvent winEvt) {
-        	if(processingDone==false){
-        		IJ.error("Script stopped...");
-        	}
-        	continueProcessing = false;	        	
-        	return;
-        }
-	});
+	
+	//For BioFormats - screen for series and add tasks accordingly
+	ImporterOptions bfOptions;
+	int series [] = new int [tasks];
+	int totSeries [] = new int [tasks];
+	Arrays.fill(series, 0);
+	Arrays.fill(totSeries, 1);
 
+//	String filesList = "Files to process:\n";
+	if(selectedTaskVariant.equals(taskVariant[1])){
+		for(int i = tasks-1; i >= 0; i--){
+			IJ.showProgress((tasks-i)/tasks);
+			try {
+				bfOptions = new ImporterOptions();
+				bfOptions.setId(""+dir[i]+name[i]+"");
+				bfOptions.setVirtual(true);
+				bfOptions.setOpenAllSeries(true);
+				ImagePlus[] imps = BF.openImagePlus(bfOptions);
+				if(imps.length > 1) {
+					String [] nameTemp = new String [name.length+imps.length-1], 
+							dirTemp = new String [name.length+imps.length-1];
+					int [] seriesTemp = new int [nameTemp.length],
+							totSeriesTemp = new int [nameTemp.length]; 
+					for(int j = 0; j < i; j++) {
+						nameTemp [j] = name [j]; 
+						dirTemp [j] = dir [j];
+						seriesTemp [j] = series [j];
+						totSeriesTemp [j] = totSeries [j];
+						
+					}
+					for(int j = 0; j < imps.length; j++) {
+						nameTemp [i+j] = name [i]; 
+						dirTemp [i+j] = dir [i];
+						seriesTemp [i+j] = j;
+						totSeriesTemp [i+j] = imps.length;
+					}
+					for(int j = i+1; j < name.length; j++) {
+						nameTemp [j+imps.length-1] = name [j]; 
+						dirTemp [j+imps.length-1] = dir [j];
+						seriesTemp [j+imps.length-1] = series [j];
+						totSeriesTemp [j+imps.length-1] = totSeries [j];
+					}
+					
+					//copy arrays
+
+					tasks = nameTemp.length;
+					name = new String [tasks];
+					dir = new String [tasks];
+					series = new int [tasks];
+					totSeries = new int [tasks];
+					
+					for(int j = 0; j < nameTemp.length; j++) {
+						name [j] = nameTemp [j];
+						dir [j] = dirTemp [j];
+						series [j] = seriesTemp [j];
+						totSeries [j] = totSeriesTemp [j];
+//						filesList += name[j] + "\t" + dir[j] + "\t" + series[j] + "\t" + totSeries[j] + "\n";
+					}
+				}
+			} catch (Exception e) {
+				IJ.log(e.getCause().getLocalizedMessage());
+				IJ.log(e.getCause().getMessage());
+				e.printStackTrace();
+			}
+		}
+	}
+	
+	
+	//add progressDialog
+		progress = new ProgressDialog(name, tasks);
+		progress.setLocation(0,0);
+		progress.setVisible(true);
+		progress.addWindowListener(new java.awt.event.WindowAdapter() {
+	        public void windowClosing(WindowEvent winEvt) {
+	        	if(processingDone==false){
+	        		IJ.error("Script stopped...");
+	        	}
+	        	continueProcessing = false;	        	
+	        	return;
+	        }
+		});
+		
+//		if(selectedTaskVariant.equals(taskVariant[1])){
+//			progress.notifyMessage(filesList, ProgressDialog.LOG);	
+//		}
+	
 	
    	ImagePlus imp; 	  	
 	for(int task = 0; task < tasks; task++){
@@ -326,12 +401,12 @@ public void run(String arg) {
 			Date startDate = new Date();
 			progress.updateBarText("in progress...");
 			//Check for problems
-			if(name[task].substring(name[task].lastIndexOf("."),name[task].length()).equals(".txt")){
+			if(name[task].contains(".") && name[task].substring(name[task].lastIndexOf("."),name[task].length()).equals(".txt")){
 				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": A file is no image! Could not be processed!", ProgressDialog.ERROR);
 				progress.moveTask(task);	
 				break running;
 			}
-			if(name[task].substring(name[task].lastIndexOf("."),name[task].length()).equals(".zip")){	
+			if(name[task].contains(".") && name[task].substring(name[task].lastIndexOf("."),name[task].length()).equals(".zip")){	
 				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": A file is no image! Could not be processed!", ProgressDialog.ERROR);
 				progress.moveTask(task);	
 				break running;
@@ -346,9 +421,22 @@ public void run(String arg) {
 		   				imp = IJ.openImage(""+dir[task]+name[task]+"");		
 		   			}else{
 		   				//bio format reader
-		   				IJ.run("Bio-Formats", "open=[" +dir[task] + name[task]
-		   						+ "] autoscale color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT");
-		   				imp = WindowManager.getCurrentImage();	
+		   				bfOptions = new ImporterOptions();
+		   				bfOptions.setId(""+dir[task]+name[task]+"");
+		   				bfOptions.setVirtual(false);
+		   				bfOptions.setAutoscale(true);
+		   				bfOptions.setColorMode(ImporterOptions.COLOR_MODE_COMPOSITE);
+		   				for(int i = 0; i < totSeries[task]; i++) {
+		   					if(i==series[task]) {
+		   						bfOptions.setSeriesOn(i, true);
+		   					}else {
+		   						bfOptions.setSeriesOn(i, false);
+		   					}
+		   				}
+		   				ImagePlus [] imps = BF.openImagePlus(bfOptions);
+//		   				IJ.run("Bio-Formats", "open=[" +dir[task] + name[task]
+//		   						+ "] autoscale color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT");
+		   				imp = imps [0];	
 		   				imp.setDisplayMode(IJ.COMPOSITE);
 		   			}
 		   			imp.hide();
@@ -374,10 +462,15 @@ public void run(String arg) {
 		   	progress.updateBarText("Create output filename");				
 			String filePrefix;
 			if(name[task].contains(".")){
-				filePrefix = name[task].substring(0,name[task].lastIndexOf(".")) + "_CQP";
+				filePrefix = name[task].substring(0,name[task].lastIndexOf("."));
 			}else{
-				filePrefix = name[task] + "_CQP";
+				filePrefix = name[task];
 			}
+			if(totSeries [task] > 1) {
+				filePrefix += "_s" + (series[task] + 1);
+			}
+			
+			filePrefix += "_CQP";
 			
 			if(chosenOutputName.equals(outputVariant[1])){
 				//saveDate
@@ -399,7 +492,7 @@ public void run(String arg) {
 		   	
 			//start logging metadata
 			TextPanel tp1 = new TextPanel("results");
-			addSettingsBlockToPanel(tp1,  startDate, name[task], imp);
+			addSettingsBlockToPanel(tp1,  startDate, name[task], totSeries[task]>1, series[task], imp);
 			tp1.append("");
 			
 			//processing
@@ -849,9 +942,13 @@ private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impT
 	}		
 }
 
-private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, ImagePlus imp){
+private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, boolean multiSeries, int series, ImagePlus imp){
 	tp.append("Starting date:	" + FullDateFormatter.format(startDate));
-	tp.append("Image name:	" + name);
+	if(multiSeries) {
+		tp.append("Image name:	" + name + "	series:	" + (series+1));
+	}else{
+		tp.append("Image name:	" + name);		
+	}
 	tp.append("Preparation settings:	");
 	tp.append("	Segmentation style:	" + chosenImageStyle);
 	
@@ -881,6 +978,10 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 		}		
 	}
 	tp.append("");
+}
+
+private void insertInLists(String name [], String dir []) {
+	
 }
 
 }//end main class
