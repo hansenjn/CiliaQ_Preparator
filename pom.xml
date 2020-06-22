@@ -3,17 +3,18 @@
 	<modelVersion>4.0.0</modelVersion>
   
 	<parent>
-		<groupId>sc.fiji</groupId>
-		<artifactId>pom-fiji</artifactId>
-		<version>17.0.0</version>
+		<groupId>org.scijava</groupId>
+		<artifactId>pom-scijava</artifactId>
+		<version>17.1.1</version>
 		<relativePath />
 	</parent> 
  
  	<artifactId>CiliaQ_Preparator_JNH</artifactId>
  	<groupId>JNH</groupId>
-    <version>0.0.5-SNAPSHOT</version>
+    <version>0.0.6-SNAPSHOT</version>
  
-<!-- Plugin Information -->
+    <name>CiliaQPrep</name>
+    <description>An imagej plugin to preprocess images for CiliaQ analysis.</description>
  	<url>https://github.com/hansenjn/</url>
 	<inceptionYear>2019</inceptionYear>
 	<organization>
@@ -65,12 +66,12 @@
 		</mailingList>
 	</mailingLists>
  	
-<!--  	<scm> -->
-<!-- 		<connection>scm:git:git://github.com/hansenjn/CiliaQ_Preparator</connection> -->
-<!-- 		<developerConnection>scm:git:git@github.com:hansenjn/CiliaQ_Preparator</developerConnection> -->
-<!-- 		<tag>HEAD</tag> -->
-<!-- 		<url>https://github.com/hansenjn/CiliaQ_Preparator</url> -->
-<!-- 	</scm> -->
+ 	<scm>
+		<connection>scm:git:git://github.com/hansenjn/CiliaQ_Preparator</connection>
+		<developerConnection>scm:git:git@github.com:hansenjn/CiliaQ_Preparator</developerConnection>
+		<tag>HEAD</tag>
+		<url>https://github.com/hansenjn/CiliaQ_Preparator</url>
+	</scm>
  	
  	<issueManagement>
 		<system>GitHub Issues</system>
@@ -103,6 +104,23 @@
             <groupId>net.imagej</groupId>
             <artifactId>ij</artifactId>
         </dependency>        
+        
+        <!-- Bio-Formats dependencies -->
+		<dependency>
+			<groupId>ome</groupId>
+			<artifactId>bio-formats_plugins</artifactId>
+			<exclusions>
+				<!-- NB: Guava requires Java 7+, so we exclude it here. -->
+				<exclusion>
+					<groupId>com.google.guava</groupId>
+					<artifactId>guava</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>ome</groupId>
+			<artifactId>formats-api</artifactId>
+		</dependency>
     </dependencies>  
     
     <build>
@@ -134,6 +152,5 @@
 			
 
 		</plugins>
-	</build>  
-    <name>CiliaQPrep</name>
+	</build>
 </project>
