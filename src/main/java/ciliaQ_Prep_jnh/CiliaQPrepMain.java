@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.0.6
+* CiliaQ_Preparator Version 0.1.0
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: June 22, 2020)
+* Date: September 29, 2019 (This Version: September 18, 2020)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -42,7 +42,7 @@ import ij.process.AutoThresholder.Method;
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.0.6";
+	static final String PLUGINVERSION = "0.1.0";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -70,9 +70,7 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	String selectedTaskVariant = taskVariant[1];
 	int tasks = 1;
 	
-	
-	boolean [] segmentChannels = new boolean [] {true, false, false};
-	
+	int nChannels = 1;
 	int [] channelIDs = new int [] {1,2,3};
 	
 	final static String[] stackMethod = {"apply threshold determined in the stack histogram",
@@ -127,25 +125,10 @@ public void run(String arg) {
 	gd.setInsets(0,10,0);	gd.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
 	gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
 	
-	gd.setInsets(10,0,0);	gd.addMessage("OPTIONAL: More channels to be segmented", HeadingFont);	
-	gd.setInsets(0,0,0);	gd.addCheckbox("Segment a second channel", segmentChannels [1]);
-	gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[1], 0);
-	gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [1]);
-	gd.setInsets(0,10,0);	gd.addCheckbox("Subtract Background before segmentation - radius", subtractBackground [1]);
-	gd.setInsets(-23,100,0);	gd.addNumericField("", subtractBGRadius[1], 2);
-	gd.setInsets(0,10,0);	gd.addChoice("Segmentation method", algorithm, chosenAlgorithms[1]);
-	gd.setInsets(0,10,0);	gd.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[1]);
-	gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [1]);	
+	gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels:", 0, 0);
+	gd.setInsets(5,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment here and CiliaQ Prepartor will provide "
+			+ "more dialogs to select the corresponding segmentation settings)", InstructionsFont);
 	
-	gd.setInsets(10,0,0);	gd.addCheckbox("Segment a third channel", segmentChannels [2]);	
-	gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[2], 0);
-	gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [2]);
-	gd.setInsets(0,10,0);	gd.addCheckbox("Subtract Background before segmentation - radius", subtractBackground [2]);
-	gd.setInsets(-23,100,0);	gd.addNumericField("", subtractBGRadius[2], 2);
-	gd.setInsets(0,10,0);	gd.addChoice("Segmentation method", algorithm, chosenAlgorithms[2]);
-	gd.setInsets(0,10,0);	gd.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[2]);	
-	gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [2]);
-		
 	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
 	gd.setInsets(5,0,0);	gd.addChoice("Segmentation style: ", intensityVariant, intensityVariant [0]);
 	gd.setInsets(5,0,0);	gd.addChoice("Output image name: ", outputVariant, chosenOutputName);
@@ -155,66 +138,98 @@ public void run(String arg) {
 	//show Dialog-----------------------------------------------------------------
 
 	//read and process variables--------------------------------------------------	
+
 	selectedTaskVariant = gd.getNextChoice();
-	
-	channelIDs [0] = (int) gd.getNextNumber();
-	includeDuplicateChannel [0] = gd.getNextBoolean();
-	subtractBackground [0] = gd.getNextBoolean();
-	subtractBGRadius [0] = (double) gd.getNextNumber();
-	chosenAlgorithms [0] = gd.getNextChoice();
-	chosenStackMethods [0] = gd.getNextChoice();
-	separateTimesteps [0] = gd.getNextBoolean();
-	
-	segmentChannels [1] = gd.getNextBoolean();
-	channelIDs [1] = (int) gd.getNextNumber();
-	includeDuplicateChannel [1] = gd.getNextBoolean();
-	subtractBackground [1] = gd.getNextBoolean();
-	subtractBGRadius [1] = (double) gd.getNextNumber();
-	chosenAlgorithms [1] = gd.getNextChoice();
-	chosenStackMethods [1] = gd.getNextChoice();
-	separateTimesteps [1] = gd.getNextBoolean();
-	
-	segmentChannels [2] = gd.getNextBoolean();
-	channelIDs [2] = (int) gd.getNextNumber();
-	includeDuplicateChannel [2] = gd.getNextBoolean();
-	subtractBackground [2] = gd.getNextBoolean();
-	subtractBGRadius [2] = (double) gd.getNextNumber();
-	chosenAlgorithms [2] = gd.getNextChoice();
-	chosenStackMethods [2] = gd.getNextChoice();
-	separateTimesteps [2] = gd.getNextBoolean();
-	
-	chosenImageStyle = gd.getNextChoice();
-	if(chosenImageStyle.equals(intensityVariant [0])){
-		keepIntensities = true;
+	{
+		int channelIDTemp = (int) gd.getNextNumber();
+		boolean includeDuplicateChannelTemp = gd.getNextBoolean();
+		boolean subtractBackgroundTemp = gd.getNextBoolean();
+		double subtractBGRadiusTemp = (double) gd.getNextNumber();
+		String chosenAlgorithmsTemp = gd.getNextChoice();
+		String chosenStackMethodsTemp = gd.getNextChoice();
+		boolean separateTimestepsTemp = gd.getNextBoolean();
+
+		nChannels = nChannels + (int) gd.getNextNumber();
+		
+		chosenImageStyle = gd.getNextChoice();
+		if(chosenImageStyle.equals(intensityVariant [0])){
+			keepIntensities = true;
+		}
+		chosenOutputName = gd.getNextChoice();	
+		
+		ChosenNumberFormat = gd.getNextChoice();
+		if(ChosenNumberFormat.equals(nrFormats[0])){ //US-Format
+			df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+			df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+			df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+		}else if (ChosenNumberFormat.equals(nrFormats[1])){
+			df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+			df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+			df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+		}
+		
+		channelIDs = new int [nChannels];
+		includeDuplicateChannel = new boolean [nChannels];
+		subtractBackground = new boolean [nChannels];
+		subtractBGRadius = new double [nChannels];
+		chosenAlgorithms = new String [nChannels];
+		chosenStackMethods = new String [nChannels];
+		separateTimesteps = new boolean [nChannels];
+		
+		channelIDs [0] = channelIDTemp;
+		includeDuplicateChannel [0] = includeDuplicateChannelTemp;
+		subtractBackground [0] = subtractBackgroundTemp;
+		subtractBGRadius [0] = subtractBGRadiusTemp;
+		chosenAlgorithms [0] = chosenAlgorithmsTemp;
+		chosenStackMethods [0] = chosenStackMethodsTemp;
+		separateTimesteps [0] = separateTimestepsTemp;
 	}
-	chosenOutputName = gd.getNextChoice();	
-	
-	ChosenNumberFormat = gd.getNextChoice();
-	if(ChosenNumberFormat.equals(nrFormats[0])){ //US-Format
-		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-	}else if (ChosenNumberFormat.equals(nrFormats[1])){
-		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-	}
+	System.gc();
 	
 	//read and process variables--------------------------------------------------
 	if (gd.wasCanceled()) return;
+	
+	for(int c = 1; c < nChannels; c++) {
+		GenericDialog gd2 = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
+		//show Dialog-----------------------------------------------------------------
+		//.setInsets(top, left, bottom)
+		gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
+		gd2.setInsets(0,0,0);	gd2.addMessage("Select the preferences for channel to be segmented "+ (c+1) + " here.", InstructionsFont);
+		
+		gd2.setInsets(0,10,0);	gd2.addNumericField("Channel Nr (>= 1 & <= nr of channels)", c+1, 0);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("Subtract Background before segmentation - radius", subtractBackground [0]);
+		gd2.setInsets(-23,100,0);	gd2.addNumericField("", subtractBGRadius[0], 2);
+		gd2.setInsets(0,10,0);	gd2.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
+		gd2.setInsets(0,10,0);	gd2.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
+		
+		gd2.showDialog();
+
+		//read and process variables--------------------------------------------------
+		channelIDs [c] = (int) gd2.getNextNumber();
+		includeDuplicateChannel [c] = gd2.getNextBoolean();
+		subtractBackground [c] = gd2.getNextBoolean();
+		subtractBGRadius [c] = (double) gd2.getNextNumber();
+		chosenAlgorithms [c] = gd2.getNextChoice();
+		chosenStackMethods [c] = gd2.getNextChoice();
+		separateTimesteps [c] = gd2.getNextBoolean();
+		
+		//read and process variables--------------------------------------------------
+		if (gd2.wasCanceled()) return;
+	}
 	
 	/*
 	 * Test whether input error
 	 * */
 	boolean passSameChannelTest = true;
-	if(segmentChannels [0] == true && segmentChannels [1] == true && channelIDs[0] == channelIDs [1]){
-		passSameChannelTest = false;
-	}
-	if(segmentChannels [2] == true && segmentChannels [1] == true && channelIDs[2] == channelIDs [1]){
-		passSameChannelTest = false;
-	}
-	if(segmentChannels [2] == true && segmentChannels [0] == true && channelIDs[2] == channelIDs [0]){
-		passSameChannelTest = false;
+	for(int c = 0; c < channelIDs.length; c++) {
+		for(int ci = 0; ci < channelIDs.length; ci++) {
+			if(c == ci) continue;
+			if(channelIDs [c] == channelIDs [ci]) {
+				passSameChannelTest = false;
+			}
+		}
 	}
 	if(!passSameChannelTest){
 		new WaitForUserDialog("CiliaQ does not allow to process one channel twice! Insert different channel IDs for different channels").show();
@@ -224,9 +239,9 @@ public void run(String arg) {
 	/*
 	 *	Instantiate settings for Canny Thresholders 
 	 * */
-	cannySettings = new ProcessSettings [segmentChannels.length];
-	for(int i = 0; i < segmentChannels.length; i++){
-		if(segmentChannels [i] && chosenAlgorithms[i] == "CANNY 3D"){
+	cannySettings = new ProcessSettings [channelIDs.length];
+	for(int i = 0; i < channelIDs.length; i++){
+		if(chosenAlgorithms[i] == "CANNY 3D"){
 			try {
 				cannySettings [i] = ProcessSettings.initByGD("Channel " + channelIDs [i]);
 			} catch (Exception e) {
@@ -497,8 +512,8 @@ public void run(String arg) {
 			
 			//processing
 			int addC = 0;
-		   	for(int c = 0; c < segmentChannels.length; c++){
-		   		if(segmentChannels [c]){
+		   	for(int c = 0; c < channelIDs.length; c++){
+		   		{
 		   			if(includeDuplicateChannel [c]){
 		   				addC ++;
 		   			}
@@ -566,7 +581,7 @@ public void run(String arg) {
 			   						indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
 			   						tempImp.getStack().setVoxel(x, y, indexNew, procImp.getStack().getVoxel(x, y, indexOld));			   						
 		   							for(int i = 0; i < channelIDs.length; i++){
-		   								if(c+1 == channelIDs [i] && segmentChannels [i] && includeDuplicateChannel [i]){
+		   								if(c+1 == channelIDs [i] && includeDuplicateChannel [i]){
 					   						cNew ++;
 					   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 					   						indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
@@ -594,7 +609,7 @@ public void run(String arg) {
 		   			newLuts [c+cNew] = originalLuts [c];
 		   			search = false;
 					for(int i = 0; i < channelIDs.length; i++){
-						if(c+1 == channelIDs [i] && segmentChannels [i]){
+						if(c+1 == channelIDs [i]){
    							search = true;
    							break;
 						}
@@ -624,7 +639,7 @@ public void run(String arg) {
 							}
 						
 						for(int i = 0; i < channelIDs.length; i++){
-							if(c+1 == channelIDs [i] && segmentChannels [i] && includeDuplicateChannel [i]){
+							if(c+1 == channelIDs [i] && includeDuplicateChannel [i]){
 								cNew ++;
    								newLuts [c+cNew] = originalLuts [c];
    								tp1.append("Channel " + (c+1+cNew) + ":	" + "previous channel " + (c+1) + "");
@@ -953,29 +968,27 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 	tp.append("	Segmentation style:	" + chosenImageStyle);
 	
 	for(int i = 0; i < channelIDs.length; i++){
-		if(segmentChannels[i]){
-			tp.append("	Segmented channel " + (i+1));
-			tp.append("		Channel Nr:	" + df0.format(channelIDs [i]));
-			if(includeDuplicateChannel [i]){
-				tp.append("		Channel duplicated to include a copy of the channel that is not segmented.");
-			}else{tp.append("");}		
-			if(subtractBackground [i]){
-				tp.append("		Subtract Background:	" + df3.format(subtractBGRadius[i]));
-			}else{tp.append("");}
-			if(chosenAlgorithms [i] == "CANNY 3D"){
-				tp.append("		Segmentation method:	" + "Canny 3D Thresholder, a plugin by Sebastian Rassmann,"
-						+ " see https://github.com/sRassmann/canny3d-thresholder for a descriptions.");
-				tp.append("			Gauss sigma:	" + cannySettings[i].getGaussSigma());
-				tp.append("			Canny alpha:	" + cannySettings[i].getCannyAlpha());
-				tp.append("			Low threshold method (hysteris thresholding):	" + cannySettings[i].getLowThresholdAlgorithm());
-				if(cannySettings[i].customValueForLowThreshold())	tp.append("			Manually selected low threshold:	" + cannySettings[i].getLowThreshold());
-				tp.append("			High threshold method (hysteris thresholding):	" + cannySettings[i].getHighThresholdAlgorithm());
-				if(cannySettings[i].customValueForHighThreshold())	tp.append("			Manually selected high threshold:	" + cannySettings[i].getHighThreshold());
-			}else{
-				tp.append("		Segmentation method:	applying intensity threshold based on the " + chosenAlgorithms [i] + " threshold algorithm.");
-				tp.append("		Stack processing:	" + chosenStackMethods [i]);
-			}
-		}		
+		tp.append("	Segmented channel " + (i+1));
+		tp.append("		Channel Nr:	" + df0.format(channelIDs [i]));
+		if(includeDuplicateChannel [i]){
+			tp.append("		Channel duplicated to include a copy of the channel that is not segmented.");
+		}else{tp.append("");}		
+		if(subtractBackground [i]){
+			tp.append("		Subtract Background:	" + df3.format(subtractBGRadius[i]));
+		}else{tp.append("");}
+		if(chosenAlgorithms [i] == "CANNY 3D"){
+			tp.append("		Segmentation method:	" + "Canny 3D Thresholder, a plugin by Sebastian Rassmann,"
+					+ " see https://github.com/sRassmann/canny3d-thresholder for a descriptions.");
+			tp.append("			Gauss sigma:	" + cannySettings[i].getGaussSigma());
+			tp.append("			Canny alpha:	" + cannySettings[i].getCannyAlpha());
+			tp.append("			Low threshold method (hysteris thresholding):	" + cannySettings[i].getLowThresholdAlgorithm());
+			if(cannySettings[i].customValueForLowThreshold())	tp.append("			Manually selected low threshold:	" + cannySettings[i].getLowThreshold());
+			tp.append("			High threshold method (hysteris thresholding):	" + cannySettings[i].getHighThresholdAlgorithm());
+			if(cannySettings[i].customValueForHighThreshold())	tp.append("			Manually selected high threshold:	" + cannySettings[i].getHighThreshold());
+		}else{
+			tp.append("		Segmentation method:	applying intensity threshold based on the " + chosenAlgorithms [i] + " threshold algorithm.");
+			tp.append("		Stack processing:	" + chosenStackMethods [i]);
+		}	
 	}
 	tp.append("");
 }
