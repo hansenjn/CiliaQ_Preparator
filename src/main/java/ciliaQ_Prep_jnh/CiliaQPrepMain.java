@@ -94,8 +94,18 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	boolean separateTimesteps [] = new boolean [] {false, false, false};	
 	String [] algorithm = {"Default", "IJ_IsoData", "Huang", "Intermodes", "IsoData", "Li", "MaxEntropy", "Mean", 
 			"MinError", "Minimum", "Moments", "Otsu", "Percentile", "RenyiEntropy", "Shanbhag", "Triangle", 
-			"Yen", "CANNY 3D", "MANUAL", "HYSTERESIS threshold"};	//TODO
+			"Yen", "CANNY 3D", "CUSTOM threshold", "HYSTERESIS threshold"};
 	String chosenAlgorithms [] = new String [] {"RenyiEntropy","RenyiEntropy","RenyiEntropy"};
+	double customThr [] = new double [] {0.0, 0.0, 0.0};
+	
+	String [] hystAlgorithms = {"CUSTOM threshold", "Default", "IJ_IsoData", "Huang", "Intermodes", "IsoData", "Li", "MaxEntropy", "Mean", 
+			"MinError", "Minimum", "Moments", "Otsu", "Percentile", "RenyiEntropy", "Shanbhag", "Triangle", 
+			"Yen"};
+	double customLowThr [] = new double [] {0.0, 0.0, 0.0};
+	double customHighThr [] = new double [] {0.0, 0.0, 0.0};
+	String chosenLowAlg [] = new String [] {"Triangle","Triangle","Triangle"};
+	String chosenHighAlg [] = new String [] {"Otsu","Otsu","Otsu"};
+	
 	static final String[] outputVariant = {"save as filename + suffix 'CQP'", "save as filename + suffix 'CQP' + date"};
 	String chosenOutputName = outputVariant[0];
 	
@@ -124,7 +134,7 @@ public void run(String arg) {
 	gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
 	
 	gd.setInsets(10,0,0);	gd.addChoice("Preferences: ", settingsMethod, selectedSettingsVariant);
-	gd.setInsets(0,0,0);	gd.addMessage("Note: you may only load preferences from CiliaQ Preparator analysis v0.0.6 or higher.", InstructionsFont);
+	gd.setInsets(0,0,0);	gd.addMessage("Note: you may only load preferences from CiliaQ Preparator version v0.0.6 or higher.", InstructionsFont);
 	
 	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
 	gd.setInsets(5,0,0);	gd.addChoice("Output image name: ", outputVariant, chosenOutputName);
@@ -151,7 +161,9 @@ public void run(String arg) {
 	if (gd.wasCanceled()) return;
 	
 	if(selectedSettingsVariant.equals(settingsMethod [0])){
-		enterSettings();
+		if(!enterSettings()) {
+			return;
+		}
 		/*
 		 *	Instantiate settings for Canny Thresholders 
 		 * */
@@ -163,7 +175,20 @@ public void run(String arg) {
 				} catch (Exception e) {
 					return;
 				}
-				
+			}		
+		}
+		/*
+		 *	Instantiate settings for Hysteresis Threshold
+		 * */
+		customLowThr = new double [channelIDs.length];
+		customHighThr = new double [channelIDs.length];
+		chosenLowAlg = new String [channelIDs.length];
+		chosenHighAlg = new String [channelIDs.length];
+		for(int i = 0; i < channelIDs.length; i++){
+			if(chosenAlgorithms[i] == "HYSTERESIS threshold") {
+				if(!requestHysteresisPrefs("channel " + i + " with channel nr " + channelIDs [i], i)) {
+					return;
+				}
 			}		
 		}
 	}else if(!importSettings()) {
@@ -436,7 +461,7 @@ public void run(String arg) {
 		*** 						Processing							***	
 		*******************************************************************/
 		   	ImagePlus tempImp, procImp;
-		   	double thresholds [], threshold;
+		   	double thresholds [], threshold, thresholdsHyst [][];
 		   	procImp = imp.duplicate();
 		   	procImp.setCalibration(imp.getCalibration());
 		   	procImp.deleteRoi();
@@ -466,7 +491,7 @@ public void run(String arg) {
 			   		}
 		   			if(divideBackground [c]){
 		   				progress.updateBarText("Divide by background for channel " + channelIDs [c] + " ...");	
-		   				tempImp.duplicate().show();	//TODO
+		   				tempImp.duplicate().show();
 			   			tempImp = divideByBackground(tempImp, divideBGRadius [c]);
 			   			//TODO verify
 			   			tempImp.show();
@@ -480,12 +505,31 @@ public void run(String arg) {
 		   							
 			   			tempImp.changes = false;
 			   			tempImp.close();
-		   			}else{
+		   			}else if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
+		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with HYSTERESIS threshold ...");
+		   				tp1.append("Hysteresis threshold(s) for channel " + channelIDs [c]);
+		   				thresholdsHyst = getHysteresisThresholds(tempImp, c, separateTimesteps [c], progress);
+			   			tp1.append("	Time step #	Low Threshold	Hight Thredshold");
+			   			for(int t = 0; t < procImp.getNFrames(); t++){
+		   					tp1.append("	" + df0.format(t+1) + "	" + df3.format(thresholdsHyst[t][0]) + "	" + df3.format(thresholdsHyst[t][1]));				
+			   			}
+
+			   			segmentUsingHysteresis(tempImp, progress, thresholdsHyst, procImp, channelIDs [c]); 				
+
+			   			tempImp.changes = false;
+			   			tempImp.close();
+		   			}else {
 		   				progress.updateBarText("Determine threshold for channel " + channelIDs [c] + " ...");				   			
 			   			tp1.append("Threshold(s) for channel " + channelIDs [c]);
-			   			thresholds = getThresholds(tempImp, chosenStackMethods [c], chosenAlgorithms [c], separateTimesteps [c], progress);
-			   			threshold = thresholds [0];
-			   			if(!separateTimesteps [c]){
+			   			if(!chosenAlgorithms [c].equals("CUSTOM threshold")) {
+			   				thresholds = getThresholds(tempImp, chosenStackMethods [c], chosenAlgorithms [c], separateTimesteps [c], progress);
+				   			threshold = thresholds [0];
+			   			}else {
+			   				threshold = customThr [c];
+			   				thresholds = new double[procImp.getNFrames()];
+			   				Arrays.fill(thresholds,threshold);
+			   			}
+			   			if(chosenAlgorithms [c].equals("CUSTOM threshold") || !separateTimesteps [c]){
 			   				tp1.append("	All timesteps:	" + df3.format(threshold));
 			   			}else{
 			   				tp1.append("	Time step #	Threshold");
@@ -493,7 +537,7 @@ public void run(String arg) {
 			   			for(int t = 0; t < procImp.getNFrames(); t++){
 			   				progress.updateBarText("Applying segmentation to channel " + channelIDs [c] + " ...");
 			   				progress.addToBar(0.2/procImp.getNFrames());
-			   				if(separateTimesteps [c]){
+			   				if(separateTimesteps [c] && !chosenAlgorithms [c].equals("CUSTOM threshold")){
 			   					threshold = thresholds [t];	
 			   					tp1.append("	" + df0.format(t+1) + "	" + df3.format(threshold));
 			   				}
@@ -682,7 +726,7 @@ public void run(String arg) {
 }
 
 /**
- * Import settings from existing file	TODO
+ * Import settings from existing file
  */
 private boolean importSettings() {
 	java.awt.FileDialog fd = new java.awt.FileDialog((Frame) null, "Select files to add to list.");
@@ -744,10 +788,15 @@ private boolean importSettings() {
 	Arrays.fill(subtractBackground,false);
 	subtractBGRadius = new double [nChannels];
 	chosenAlgorithms = new String [nChannels];
+	customThr = new double [nChannels];
 	chosenStackMethods = new String [nChannels];
 	separateTimesteps = new boolean [nChannels];
 	Arrays.fill(separateTimesteps,false);
 	cannySettings = new ProcessSettings [nChannels];
+	customLowThr = new double [nChannels];
+	customHighThr = new double [nChannels];
+	chosenLowAlg = new String [nChannels];
+	chosenHighAlg = new String [nChannels];
 	
 	//read individual channel settings
 	boolean channelReading = false;
@@ -879,6 +928,70 @@ private boolean importSettings() {
 							cannySettings [actualC].setHighThr(Double.parseDouble(tempString));
 						}
 						IJ.log("C" + actualC + ": High Thr" + cannySettings [actualC].getHighThresholdAlgorithm());
+						
+					}else if(line.contains("HYSTERESIS threshold")) {
+						chosenAlgorithms [actualC] = algorithm [19];
+						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
+						
+						line = br.readLine();	
+						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
+						if(!line.contains("Low threshold method (hysteris thresholding):")) {
+							IJ.error("LowThr method not found in Hysteresis settings - no preferences loading!");
+							return false;
+						}
+						for(int a = 0; a < hystAlgorithms.length; a++) {
+							if(line.contains(hystAlgorithms[a])) {
+								chosenLowAlg [actualC] = (hystAlgorithms [a]);
+								break;
+							}
+						}	
+						IJ.log("C" + actualC + ": Low Thr method" + chosenHighAlg [actualC]);
+						if(chosenLowAlg [actualC].equals(hystAlgorithms[0])) {
+							line = br.readLine();
+							if(!line.contains("Manually selected low threshold:")){
+								IJ.error("Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
+								return false;
+							}
+							tempString = line.substring(line.lastIndexOf("	")+1);
+							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
+							customLowThr [actualC] = (Double.parseDouble(tempString));
+							IJ.log("C" + actualC + ": Low Thr" + customLowThr [actualC]);
+						}
+						
+						line = br.readLine();	
+						if(!line.contains("High threshold method (hysteris thresholding):")) {
+							IJ.error("HiThr method not found in Hysteresis settings - no preferences loading!");
+							return false;
+						}
+						for(int a = 0; a < hystAlgorithms.length; a++) {
+							if(line.contains(hystAlgorithms[a])) {
+								chosenHighAlg [actualC] = (hystAlgorithms [a]);
+								break;
+							}
+						}
+						IJ.log("C" + actualC + ": High Thr method" + chosenHighAlg [actualC]);
+						if(chosenHighAlg [actualC].equals(hystAlgorithms[0])) {
+							line = br.readLine();
+							if(!line.contains("Manually selected high threshold:")){
+								IJ.error("Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
+								return false;
+							}
+							tempString = line.substring(line.lastIndexOf("	")+1);
+							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
+							customHighThr [actualC] = (Double.parseDouble(tempString));
+							IJ.log("C" + actualC + ": High Thr" + customHighThr [actualC]);
+						}
+					}else if(line.contains("CUSTOM threshold")) {
+						chosenAlgorithms [actualC] = algorithm [18];
+						line = br.readLine();
+						if(!line.contains("Custom threshold value:")){
+							IJ.error("Could not find custom threshold value in settings - no preferences loaded!");
+							return false;
+						}
+						tempString = line.substring(line.lastIndexOf("	")+1);
+						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
+						customThr [actualC] = Double.parseDouble(tempString);
+						IJ.log("C" + actualC + ": custom thr" + customThr);
 					}else if(line.contains("applying intensity threshold based ")) {
 						for(int a = 0; a < algorithm.length; a++) {
 							if(line.contains(algorithm[a])) {
@@ -915,7 +1028,7 @@ private boolean importSettings() {
 /**
  * Show dialogs to enter settings
  * */
-private void enterSettings() {
+private boolean enterSettings() {
 	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 	//-------------------------GenericDialog--------------------------------------
 	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
@@ -925,9 +1038,6 @@ private void enterSettings() {
 		//.setInsets(top, left, bottom)
 		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
 		gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
-		gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats. "
-									+ "The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
-		
 		gd.setInsets(10,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
 		gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
 		gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
@@ -936,11 +1046,14 @@ private void enterSettings() {
 		gd.setInsets(0,10,0);	gd.addCheckbox("Divide by Background before segmentation - radius", divideBackground [0]);
 		gd.setInsets(-23,100,0);	gd.addNumericField("", divideBGRadius[0], 2);
 		gd.setInsets(0,10,0);	gd.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
+		gd.setInsets(0,0,0);	gd.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
+				+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
+		gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
 		gd.setInsets(0,10,0);	gd.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
 		gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
 		
 		gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels:", 0, 0);
-		gd.setInsets(5,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment here and CiliaQ Prepartor will provide "
+		gd.setInsets(0,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment here and CiliaQ Prepartor will provide "
 				+ "more dialogs to select the corresponding segmentation settings)", InstructionsFont);
 		
 		gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
@@ -960,6 +1073,7 @@ private void enterSettings() {
 			boolean divideBackgroundTemp = gd.getNextBoolean();
 			double divideBGRadiusTemp = (double) gd.getNextNumber();
 			String chosenAlgorithmsTemp = gd.getNextChoice();
+			double customThrTemp = gd.getNextNumber();
 			String chosenStackMethodsTemp = gd.getNextChoice();
 			boolean separateTimestepsTemp = gd.getNextBoolean();
 
@@ -975,6 +1089,7 @@ private void enterSettings() {
 			subtractBackground = new boolean [nChannels];
 			subtractBGRadius = new double [nChannels];
 			chosenAlgorithms = new String [nChannels];
+			customThr = new double [nChannels];
 			chosenStackMethods = new String [nChannels];
 			separateTimesteps = new boolean [nChannels];
 			
@@ -985,13 +1100,14 @@ private void enterSettings() {
 			divideBackground [0] = divideBackgroundTemp;
 			divideBGRadius [0] = divideBGRadiusTemp;
 			chosenAlgorithms [0] = chosenAlgorithmsTemp;
+			customThr [0] = customThrTemp;
 			chosenStackMethods [0] = chosenStackMethodsTemp;
 			separateTimesteps [0] = separateTimestepsTemp;
 		}
 		System.gc();
 		
 		//read and process variables--------------------------------------------------
-		if (gd.wasCanceled()) return;
+		if (gd.wasCanceled()) return false;
 		
 		for(int c = 1; c < nChannels; c++) {
 			GenericDialog gd2 = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
@@ -1007,6 +1123,9 @@ private void enterSettings() {
 			gd2.setInsets(0,10,0);	gd2.addCheckbox("Divide by Background before segmentation - radius", divideBackground [0]);
 			gd2.setInsets(-23,100,0);	gd2.addNumericField("", divideBGRadius[0], 2);
 			gd2.setInsets(0,10,0);	gd2.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
+			gd.setInsets(0,0,0);	gd.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
+					+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
+			gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
 			gd2.setInsets(0,10,0);	gd2.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
 			gd2.setInsets(0,10,0);	gd2.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
 			
@@ -1020,14 +1139,15 @@ private void enterSettings() {
 			divideBackground [c] = gd2.getNextBoolean();
 			divideBGRadius [c] = (double) gd2.getNextNumber();
 			chosenAlgorithms [c] = gd2.getNextChoice();
+			customThr [c] = gd2.getNextNumber();
 			chosenStackMethods [c] = gd2.getNextChoice();
 			separateTimesteps [c] = gd2.getNextBoolean();
 			
 			//read and process variables--------------------------------------------------
-			if (gd2.wasCanceled()) return;
+			if (gd2.wasCanceled()) return false;
 		}	
-
 		System.gc();
+		return true;
 	}
 
 static ImagePlus divideByBackground(ImagePlus imp, double radius) {
@@ -1141,7 +1261,7 @@ private double [] getThresholds (ImagePlus imp, String chosenMethod, String chos
 }
 
 /**	
- * 
+ *	Segment image using CANNY 3D method 
  * */
 private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, ProcessSettings settings, ImagePlus writeImp, int channelWriteImp){
 	ImagePlus selectedImp;
@@ -1182,6 +1302,130 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, 
 		System.gc();
 		progress.addToBar(0.8/(double)(channelImp.getNFrames()));
 	}
+}
+
+/**	
+ *	Segment image using Hysteresis threshold 
+ * */
+private void segmentUsingHysteresis(ImagePlus channelImp, ProgressDialog progress, double thresholds [][], ImagePlus writeImp, int channelWriteImp){
+	ImagePlus selectedImp;
+	int indexSelected, indexWriteImp;
+	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
+	for(int t = 0; t < channelImp.getNFrames(); t++){
+		/*
+		 * Extract single time point and 
+		 * */
+		selectedImp = getSelectedTimepoints(channelImp, t+1, t+1, false);	
+		
+		/*
+		 * Convert to bin
+		 * */			
+		selectedImp = doHysteresisThreshold(selectedImp, progress, thresholds [t]);
+		
+		/*
+		 * Write back to image
+		 * */		
+		for(int s = 0; s < selectedImp.getNSlices(); s++){
+			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
+			indexWriteImp = writeImp.getStackIndex(channelWriteImp, s+1, t+1)-1;
+			for(int x = 0; x < selectedImp.getWidth(); x++){
+				for(int y = 0; y < selectedImp.getHeight(); y++){
+					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
+						writeImp.getStack().setVoxel(x, y, indexWriteImp, 0.0);
+					}else if(!keepIntensities){
+						writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
+					}
+				}
+			}
+		}
+		
+		selectedImp.changes = false;
+		selectedImp.close();
+		System.gc();
+		progress.addToBar(0.8/(double)(channelImp.getNFrames()));
+	}
+}
+
+/**
+ * Perform a hysteresis threshold on a single image
+ * */
+private ImagePlus doHysteresisThreshold(ImagePlus imp, ProgressDialog pD, double thresholds []) {
+	pD.updateBarText("Hysteresis threshold - segmentation running");
+	
+	IJ.run(imp, "3D Hysteresis Thresholding", "high=" + thresholds [1] + " low=" + thresholds [0]);
+	ImagePlus bin = WindowManager.getCurrentImage();
+	bin.hide();
+	return bin;
+}
+
+/*
+ * 
+ * */
+private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, boolean seperateTimeSteps, ProgressDialog progress){
+	int startGroup = 1, endGroup = imp.getNFrames();
+	ImagePlus selectedImp;
+	double thresholds [][] = new double [1][2]; // first dim: image, 2nd dim: 0 = low, 1 = high
+	Arrays.fill(thresholds[0],Double.NaN);
+	
+	if(seperateTimeSteps){
+		thresholds = new double [endGroup-startGroup+1][2];
+	}
+	String chosenAlg = "";
+	for(int i = 0; i < 2; i++) {
+		if(i == 0) {
+			chosenAlg = chosenLowAlg[settingsID];
+			if(chosenAlg.equals(hystAlgorithms[0])) { // CUSTOM THR
+				for(int t = startGroup-1; t < endGroup; t++){
+					thresholds [t-(startGroup-1)][i] = customLowThr [settingsID];
+				}
+				continue;
+			}
+		}else if(i == 1) {
+			chosenAlg = chosenHighAlg[settingsID];
+			if(chosenAlg.equals(hystAlgorithms[0])) { // CUSTOM THR
+				for(int t = startGroup-1; t < endGroup; t++){
+					thresholds [t-(startGroup-1)][i] = customHighThr [settingsID];
+				}
+				continue;
+			}
+		}
+		
+		if(seperateTimeSteps){			
+			for(int t = startGroup-1; t < endGroup; t++){
+				selectedImp = getSelectedTimepoints(imp, t+1, t+1, false);
+				if(chosenStackMethods[settingsID].equals(stackMethod[0])){
+					thresholds [t-(startGroup-1)][i] = getHistogramThreshold(selectedImp, chosenAlg);
+				}else if(chosenStackMethods[settingsID].equals(stackMethod[1])){
+					selectedImp = maximumProjection(selectedImp, 1, selectedImp.getStackSize());
+					thresholds [t-(startGroup-1)][i] = getSingleSliceImageThreshold(selectedImp, 1, chosenAlg);					
+				}else{
+					thresholds [t-(startGroup-1)][i] = getSingleSliceImageThreshold(selectedImp, 1, chosenAlg);		
+				}				
+				selectedImp.changes = false;
+				selectedImp.close();
+				System.gc();
+				progress.addToBar(0.8/(endGroup-startGroup));
+			}
+		}else{
+			selectedImp = getSelectedTimepoints(imp, startGroup, endGroup, false);
+			if(chosenStackMethods[settingsID].equals(stackMethod[0])){
+				thresholds [0][i] = getHistogramThreshold(selectedImp, chosenAlg);
+			}else if(chosenStackMethods[settingsID].equals(stackMethod[1])){
+				selectedImp = maximumProjection(selectedImp, 1, selectedImp.getStackSize());
+				thresholds [0][i] = getSingleSliceImageThreshold(selectedImp, 1, chosenAlg);	
+			}else{
+				thresholds [0][i] = getSingleSliceImageThreshold(selectedImp, 1, chosenAlg);	
+			}
+			for(int t = startGroup; t < endGroup; t++){
+				thresholds [t-(startGroup-1)][i] = thresholds [0][i];
+			}
+			progress.addToBar(0.8);
+			selectedImp.changes = false;
+			selectedImp.close();			
+			System.gc();
+		}
+	}
+	return thresholds;
 }
 
 /**
@@ -1278,6 +1522,33 @@ private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impT
 	}		
 }
 
+private boolean requestHysteresisPrefs(String Task, int c) {
+	GenericDialog gd = new GenericDialog(PLUGINNAME + " - Hysteresis thresholding");
+	gd.addMessage(PLUGINNAME + " - Version " + PLUGINVERSION + "",
+			new Font("Sansserif", Font.BOLD, 14));
+	gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
+	gd.setInsets(0,0,0);	gd.addMessage("Hysteresis thresholding requires the '3D ImageJ suite' (https://imagejdocu.tudor.lu/plugin/stacks/3d_ij_suite/start#download).", new Font("Sansserif", 2, 12));
+	gd.setInsets(-5,0,0);	gd.addMessage("Please install the plugins and core from '3D ImageJ suite' to use this function in CiliaQ Preparator!", new Font("Sansserif", 2, 12));
+	
+	gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", hystAlgorithms, chosenLowAlg [c]);
+	gd.setInsets(0,0,0);	gd.addNumericField("Low threshold (if 'CUSTOM threshold' is chosen)", customLowThr [c], 5);
+	gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", hystAlgorithms, chosenHighAlg [c]);
+	gd.setInsets(0,0,0);	gd.addNumericField("High threshold (if 'CUSTOM threshold' is chosen)", customHighThr [c], 5);
+
+	// show Dialog-----------------------------------------------------------------
+	gd.showDialog();
+
+	// read and process variables--------------------------------------------------
+	chosenLowAlg [c] = gd.getNextChoice();
+	customLowThr [c] = gd.getNextNumber();
+	chosenHighAlg [c] = gd.getNextChoice();
+	customHighThr [c] = gd.getNextNumber();
+	if (gd.wasCanceled()) {
+		return false;
+	}
+	return true;
+}
+
 private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, boolean multiSeries, int series, ImagePlus imp){
 	tp.append("Starting date:	" + FullDateFormatter.format(startDate));
 	if(multiSeries) {
@@ -1313,6 +1584,19 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 			if(cannySettings[i].customValueForHighThreshold()) {
 				tp.append("			Manually selected high threshold:	" + cannySettings[i].getHighThreshold());
 			}
+		}else if (chosenAlgorithms [i] == "HYSTERESIS threshold"){
+			tp.append("		Segmentation method:	" + "HYSTERESIS threshold");
+			tp.append("			Low threshold method (hysteris thresholding):	" + chosenLowAlg [i]);
+			if(chosenLowAlg [i].equals(hystAlgorithms [0])) {
+				tp.append("			Manually selected low threshold:	" + customLowThr [i]);
+			}
+			tp.append("			High threshold method (hysteris thresholding):	" + chosenHighAlg [i]);
+			if(chosenHighAlg [i].equals(hystAlgorithms [0])) {
+				tp.append("			Manually selected high threshold:	" + customHighThr [i]);
+			}
+		}else if (chosenAlgorithms [i] == "CUSTOM threshold"){
+			tp.append("		Segmentation method:	" + "CUSTOM threshold");
+			tp.append("			Custom threshold value:	" + df6.format(customThr));
 		}else{
 			tp.append("		Segmentation method:	applying intensity threshold based on the " + chosenAlgorithms [i] + " threshold algorithm.");
 			tp.append("		Stack processing:	" + chosenStackMethods [i]);
