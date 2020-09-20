@@ -184,6 +184,10 @@ public void run(String arg) {
 		customHighThr = new double [channelIDs.length];
 		chosenLowAlg = new String [channelIDs.length];
 		chosenHighAlg = new String [channelIDs.length];
+		
+		Arrays.fill(chosenLowAlg,"Triangle");
+		Arrays.fill(chosenHighAlg,"Otsu");
+		
 		for(int i = 0; i < channelIDs.length; i++){
 			if(chosenAlgorithms[i] == "HYSTERESIS threshold") {
 				if(!requestHysteresisPrefs("channel " + i + " with channel nr " + channelIDs [i], i)) {
@@ -509,7 +513,7 @@ public void run(String arg) {
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with HYSTERESIS threshold ...");
 		   				tp1.append("Hysteresis threshold(s) for channel " + channelIDs [c]);
 		   				thresholdsHyst = getHysteresisThresholds(tempImp, c, separateTimesteps [c], progress);
-			   			tp1.append("	Time step #	Low Threshold	Hight Thredshold");
+			   			tp1.append("	Time step #	Low Threshold	High Threshold");
 			   			for(int t = 0; t < procImp.getNFrames(); t++){
 		   					tp1.append("	" + df0.format(t+1) + "	" + df3.format(thresholdsHyst[t][0]) + "	" + df3.format(thresholdsHyst[t][1]));				
 			   			}
@@ -945,7 +949,7 @@ private boolean importSettings() {
 								break;
 							}
 						}	
-						IJ.log("C" + actualC + ": Low Thr method" + chosenHighAlg [actualC]);
+						IJ.log("C" + actualC + ": Low Thr method" + chosenLowAlg [actualC]);
 						if(chosenLowAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
 							if(!line.contains("Manually selected low threshold:")){
@@ -981,6 +985,20 @@ private boolean importSettings() {
 							customHighThr [actualC] = (Double.parseDouble(tempString));
 							IJ.log("C" + actualC + ": High Thr" + customHighThr [actualC]);
 						}
+						
+						if(chosenHighAlg [actualC].equals(hystAlgorithms[0]) && chosenLowAlg [actualC].equals(hystAlgorithms[0])){
+							
+						}else {
+							line = br.readLine();	
+							if(!line.equals("") && line.equals(null)){IJ.error("Reading problem with stack method"); break reading;}
+							for(int sm = 0; sm < stackMethod.length; sm++) {
+								if(line.contains(stackMethod[sm])) {
+									chosenStackMethods [actualC] = stackMethod [sm];
+									break;
+								}
+							}
+							IJ.log("C" + actualC + ": stack m " + chosenStackMethods [actualC]);	
+						}
 					}else if(line.contains("CUSTOM threshold")) {
 						chosenAlgorithms [actualC] = algorithm [18];
 						line = br.readLine();
@@ -991,7 +1009,7 @@ private boolean importSettings() {
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						customThr [actualC] = Double.parseDouble(tempString);
-						IJ.log("C" + actualC + ": custom thr" + customThr);
+						IJ.log("C" + actualC + ": custom thr" + customThr [actualC]);
 					}else if(line.contains("applying intensity threshold based ")) {
 						for(int a = 0; a < algorithm.length; a++) {
 							if(line.contains(algorithm[a])) {
@@ -1037,8 +1055,7 @@ private boolean enterSettings() {
 		//show Dialog-----------------------------------------------------------------
 		//.setInsets(top, left, bottom)
 		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
-		gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
-		gd.setInsets(10,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
+		gd.setInsets(5,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
 		gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
 		gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
 		gd.setInsets(0,10,0);	gd.addCheckbox("Subtract Background before segmentation - radius", subtractBackground [0]);
@@ -1064,7 +1081,6 @@ private boolean enterSettings() {
 
 		//read and process variables--------------------------------------------------	
 
-		selectedTaskVariant = gd.getNextChoice();
 		{
 			int channelIDTemp = (int) gd.getNextNumber();
 			boolean includeDuplicateChannelTemp = gd.getNextBoolean();
@@ -1166,7 +1182,7 @@ static ImagePlus divideByBackground(ImagePlus imp, double radius) {
 			tempImp.getProcessor().blurGaussian(radius);
 			for(int x = 0; x < imp.getWidth(); x++) {
 				for(int y = 0; y < imp.getHeight(); y++) {
-					outImp.getStack().setVoxel(x, y, outImp.getStackIndex(1, s+1, t+1), 
+					outImp.getStack().setVoxel(x, y, outImp.getStackIndex(1, s+1, t+1)-1, 
 							imp.getStack().getVoxel(x, y, imp.getStackIndex(1 , s+1, t+1)-1) 
 							/ tempImp.getStack().getVoxel(x, y, 0));
 				}
@@ -1528,7 +1544,7 @@ private boolean requestHysteresisPrefs(String Task, int c) {
 			new Font("Sansserif", Font.BOLD, 14));
 	gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
 	gd.setInsets(0,0,0);	gd.addMessage("Hysteresis thresholding requires the '3D ImageJ suite' (https://imagejdocu.tudor.lu/plugin/stacks/3d_ij_suite/start#download).", new Font("Sansserif", 2, 12));
-	gd.setInsets(-5,0,0);	gd.addMessage("Please install the plugins and core from '3D ImageJ suite' to use this function in CiliaQ Preparator!", new Font("Sansserif", 2, 12));
+	gd.setInsets(0,0,0);	gd.addMessage("Please install the plugins and core from '3D ImageJ suite' to use this function in CiliaQ Preparator!", new Font("Sansserif", 2, 12));
 	
 	gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", hystAlgorithms, chosenLowAlg [c]);
 	gd.setInsets(0,0,0);	gd.addNumericField("Low threshold (if 'CUSTOM threshold' is chosen)", customLowThr [c], 5);
@@ -1594,9 +1610,13 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 			if(chosenHighAlg [i].equals(hystAlgorithms [0])) {
 				tp.append("			Manually selected high threshold:	" + customHighThr [i]);
 			}
+			if(chosenHighAlg [i].equals(hystAlgorithms[0]) && chosenLowAlg [i].equals(hystAlgorithms[0])){
+			}else {
+				tp.append("		Stack processing:	" + chosenStackMethods [i]);
+			}
 		}else if (chosenAlgorithms [i] == "CUSTOM threshold"){
 			tp.append("		Segmentation method:	" + "CUSTOM threshold");
-			tp.append("			Custom threshold value:	" + df6.format(customThr));
+			tp.append("			Custom threshold value:	" + df6.format(customThr [i]));
 		}else{
 			tp.append("		Segmentation method:	applying intensity threshold based on the " + chosenAlgorithms [i] + " threshold algorithm.");
 			tp.append("		Stack processing:	" + chosenStackMethods [i]);
