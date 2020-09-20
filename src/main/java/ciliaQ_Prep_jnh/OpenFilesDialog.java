@@ -48,7 +48,6 @@ public class OpenFilesDialog extends javax.swing.JFrame implements ActionListene
 
 	public OpenFilesDialog() {
 		super();
-		System.out.println("Here");
 		initGUI();
 	}
 	
