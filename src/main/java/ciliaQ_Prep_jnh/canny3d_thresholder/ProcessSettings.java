@@ -47,7 +47,7 @@ public class ProcessSettings {
 		GenericDialog gd = new GenericDialog(pluginName + " - Image Processing Settings");
 		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann)",
 				new Font("Sansserif", Font.BOLD, 14));
-		gd.setInsets(0,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
+		gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
 		gd.setInsets(0,0,0);	gd.addMessage("Canny 3D Thresholder requires the installation of additional packages in your FIJI/ImageJ distribution.", new Font("Sansserif", 2, 12));
 		gd.setInsets(-5,0,0);	gd.addMessage("Please read the paragraph Installation at:", new Font("Sansserif", 2, 12));
 		gd.setInsets(-5,20,0);	gd.addMessage("https://github.com/sRassmann/canny3d-thresholder.", new Font("Sansserif", 2, 12));
@@ -72,6 +72,10 @@ public class ProcessSettings {
 		if (gd.wasCanceled())
 			throw new Exception("GD canceled by user");
 		return inst;
+	}
+	
+	public static ProcessSettings initDefault(){
+		return new ProcessSettings();
 	}
 	
 	public String toString() {
