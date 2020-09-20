@@ -19,7 +19,7 @@ public class ProcessSettings {
 	
 	double gaussSigma = 1.0;
 	double cannyAlpha = 5.0;
-	static String[] thrAlgorithms = {"Custom Value", "Huang", "Intermodes", "IsoData", "IJ_IsoData", "Li",
+	public static String[] thrAlgorithms = {"Custom Value", "Huang", "Intermodes", "IsoData", "IJ_IsoData", "Li",
 			"MaxEntropy", "Mean", "MinError", "Minimum", "Moments", "Otsu", "Percentile", "RenyiEntropy", "Shanbhag",
 			"Triangle", "Yen" };
 	String lowThrAlgorithm = "Otsu";
@@ -93,21 +93,45 @@ public class ProcessSettings {
 	public double getGaussSigma(){
 		return gaussSigma;
 	}
+	public void setGaussSigma(double sigma){
+		gaussSigma = sigma;
+	}
+	
 	public double getCannyAlpha(){
 		return cannyAlpha;
 	}
+	public void setCannyAlpha(double alpha){
+		cannyAlpha = alpha;
+	}
+	
 	public String getLowThresholdAlgorithm(){
 		return lowThrAlgorithm;
 	}
+	public void setLowThresholdAlgorithm(String alg){
+		lowThrAlgorithm = alg;
+	}
+	
 	public String getHighThresholdAlgorithm(){
 		return highThrAlgorithm;
 	}
+	public void setHighThresholdAlgorithm(String alg){
+		highThrAlgorithm = alg;
+	}
+	
 	public double getLowThreshold(){
 		return lowThr;
 	}
+	public void setLowThr(double thr){
+		lowThr = thr;
+	}
+	
 	public double getHighThreshold(){
 		return highThr;
-	}	
+	}
+	public void setHighThr(double thr){
+		highThr = thr;
+	}
+	
 	public boolean customValueForLowThreshold(){
 		if(lowThrAlgorithm.equals(thrAlgorithms[0]))	return true;
 		else return false;
