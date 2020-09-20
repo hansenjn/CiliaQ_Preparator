@@ -91,6 +91,10 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	boolean includeDuplicateChannel [] = new boolean [] {true,true,true};
 	double subtractBGRadius [] = new double [] {10.0, 10.0, 10.0};
 	double divideBGRadius [] = new double [] {3.0, 3.0, 3.0};
+	
+	boolean additionalBlur [] = new boolean [] {false,false,false};
+	double additionalBlurRadius [] = new double [] {0.5, 0.5, 0.5};
+	
 	boolean separateTimesteps [] = new boolean [] {false, false, false};	
 	String [] algorithm = {"Default", "IJ_IsoData", "Huang", "Intermodes", "IsoData", "Li", "MaxEntropy", "Mean", 
 			"MinError", "Minimum", "Moments", "Otsu", "Percentile", "RenyiEntropy", "Shanbhag", "Triangle", 
@@ -495,13 +499,17 @@ public void run(String arg) {
 			   		}
 		   			if(divideBackground [c]){
 		   				progress.updateBarText("Divide by background for channel " + channelIDs [c] + " ...");	
-		   				tempImp.duplicate().show();
 			   			tempImp = divideByBackground(tempImp, divideBGRadius [c]);
-			   			//TODO verify
+			   		}
+		   			if(additionalBlur [c]) {
+		   				progress.updateBarText("Blur " + channelIDs [c] + " ...");	
+		   				tempImp.duplicate().show();
+		   				tempImp = blurGaussian(tempImp, additionalBlurRadius [c]);
+		   			//TODO verify
 			   			tempImp.show();
 			   			new WaitForUserDialog("check tempImp").show();
 			   			tempImp.hide();
-			   		}
+		   			}
 		   			if(chosenAlgorithms [c].equals("CANNY 3D")){
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with CANNY 3D ...");
 		   				
@@ -853,6 +861,13 @@ private boolean importSettings() {
 					divideBGRadius [actualC] = Double.parseDouble(tempString);	
 					IJ.log("C" + actualC + ": dbg rad = " + divideBGRadius [actualC]);						
 				}
+				if(line.contains("Additional blur with Gaussian")){
+					additionalBlur [actualC] = true;
+					tempString = line.substring(line.lastIndexOf("	")+1);
+					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
+					additionalBlurRadius [actualC] = Double.parseDouble(tempString);	
+					IJ.log("C" + actualC + ": blur rad = " + additionalBlurRadius [actualC]);						
+				}
 				if(line.contains("Every time step separately segmented.")) {
 					separateTimesteps [actualC]= true;
 					IJ.log("C" + actualC + ": time steps separately");	
@@ -873,7 +888,7 @@ private boolean importSettings() {
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						cannySettings [actualC].setGaussSigma(Double.parseDouble(tempString));
-						IJ.log("C" + actualC + ": Gauss" + cannySettings [actualC].getGaussSigma());	
+						IJ.log("C" + actualC + ": Gauss " + cannySettings [actualC].getGaussSigma());	
 						
 						line = br.readLine();	
 						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
@@ -884,7 +899,7 @@ private boolean importSettings() {
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						cannySettings [actualC].setCannyAlpha(Double.parseDouble(tempString));
-						IJ.log("C" + actualC + ": Alpha" + cannySettings [actualC].getCannyAlpha());
+						IJ.log("C" + actualC + ": Alpha " + cannySettings [actualC].getCannyAlpha());
 						
 						line = br.readLine();	
 						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
@@ -908,7 +923,7 @@ private boolean importSettings() {
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							cannySettings [actualC].setLowThr(Double.parseDouble(tempString));
 						}
-						IJ.log("C" + actualC + ": low Thr" + cannySettings [actualC].getLowThresholdAlgorithm());
+						IJ.log("C" + actualC + ": low Thr " + cannySettings [actualC].getLowThresholdAlgorithm());
 						
 						line = br.readLine();	
 						if(!line.contains("High threshold method")) {
@@ -931,7 +946,7 @@ private boolean importSettings() {
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							cannySettings [actualC].setHighThr(Double.parseDouble(tempString));
 						}
-						IJ.log("C" + actualC + ": High Thr" + cannySettings [actualC].getHighThresholdAlgorithm());
+						IJ.log("C" + actualC + ": High Thr " + cannySettings [actualC].getHighThresholdAlgorithm());
 						
 					}else if(line.contains("HYSTERESIS threshold")) {
 						chosenAlgorithms [actualC] = algorithm [19];
@@ -959,7 +974,7 @@ private boolean importSettings() {
 							tempString = line.substring(line.lastIndexOf("	")+1);
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							customLowThr [actualC] = (Double.parseDouble(tempString));
-							IJ.log("C" + actualC + ": Low Thr" + customLowThr [actualC]);
+							IJ.log("C" + actualC + ": Low Thr " + customLowThr [actualC]);
 						}
 						
 						line = br.readLine();	
@@ -983,7 +998,7 @@ private boolean importSettings() {
 							tempString = line.substring(line.lastIndexOf("	")+1);
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							customHighThr [actualC] = (Double.parseDouble(tempString));
-							IJ.log("C" + actualC + ": High Thr" + customHighThr [actualC]);
+							IJ.log("C" + actualC + ": High Thr " + customHighThr [actualC]);
 						}
 						
 						if(chosenHighAlg [actualC].equals(hystAlgorithms[0]) && chosenLowAlg [actualC].equals(hystAlgorithms[0])){
@@ -1062,6 +1077,8 @@ private boolean enterSettings() {
 		gd.setInsets(-23,100,0);	gd.addNumericField("", subtractBGRadius[0], 2);
 		gd.setInsets(0,10,0);	gd.addCheckbox("Divide by Background before segmentation - radius", divideBackground [0]);
 		gd.setInsets(-23,100,0);	gd.addNumericField("", divideBGRadius[0], 2);
+		gd.setInsets(0,10,0);	gd.addCheckbox("Smooth with Gaussian blur - radius", additionalBlur [0]);
+		gd.setInsets(-23,100,0);	gd.addNumericField("", additionalBlurRadius[0], 2);
 		gd.setInsets(0,10,0);	gd.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
 		gd.setInsets(0,0,0);	gd.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
 				+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
@@ -1088,6 +1105,8 @@ private boolean enterSettings() {
 			double subtractBGRadiusTemp = (double) gd.getNextNumber();
 			boolean divideBackgroundTemp = gd.getNextBoolean();
 			double divideBGRadiusTemp = (double) gd.getNextNumber();
+			boolean additionalBlurTemp = gd.getNextBoolean();
+			double additionalBlurRadiusTemp = (double) gd.getNextNumber();
 			String chosenAlgorithmsTemp = gd.getNextChoice();
 			double customThrTemp = gd.getNextNumber();
 			String chosenStackMethodsTemp = gd.getNextChoice();
@@ -1104,6 +1123,10 @@ private boolean enterSettings() {
 			includeDuplicateChannel = new boolean [nChannels];
 			subtractBackground = new boolean [nChannels];
 			subtractBGRadius = new double [nChannels];
+			divideBackground = new boolean [nChannels];
+			divideBGRadius = new double [nChannels];
+			additionalBlur = new boolean [nChannels];
+			additionalBlurRadius = new double [nChannels];
 			chosenAlgorithms = new String [nChannels];
 			customThr = new double [nChannels];
 			chosenStackMethods = new String [nChannels];
@@ -1115,6 +1138,8 @@ private boolean enterSettings() {
 			subtractBGRadius [0] = subtractBGRadiusTemp;
 			divideBackground [0] = divideBackgroundTemp;
 			divideBGRadius [0] = divideBGRadiusTemp;
+			additionalBlur [0] = additionalBlurTemp;
+			additionalBlurRadius [0] = additionalBlurRadiusTemp;
 			chosenAlgorithms [0] = chosenAlgorithmsTemp;
 			customThr [0] = customThrTemp;
 			chosenStackMethods [0] = chosenStackMethodsTemp;
@@ -1138,10 +1163,12 @@ private boolean enterSettings() {
 			gd2.setInsets(-23,100,0);	gd2.addNumericField("", subtractBGRadius[0], 2);
 			gd2.setInsets(0,10,0);	gd2.addCheckbox("Divide by Background before segmentation - radius", divideBackground [0]);
 			gd2.setInsets(-23,100,0);	gd2.addNumericField("", divideBGRadius[0], 2);
+			gd2.setInsets(0,10,0);	gd2.addCheckbox("Smooth with Gaussian blur - radius", additionalBlur [0]);
+			gd2.setInsets(-23,100,0);	gd2.addNumericField("", additionalBlurRadius[0], 2);
 			gd2.setInsets(0,10,0);	gd2.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
-			gd.setInsets(0,0,0);	gd.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
+			gd2.setInsets(0,0,0);	gd2.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
 					+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
-			gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
+			gd2.setInsets(0,0,0);	gd2.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
 			gd2.setInsets(0,10,0);	gd2.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
 			gd2.setInsets(0,10,0);	gd2.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
 			
@@ -1154,6 +1181,8 @@ private boolean enterSettings() {
 			subtractBGRadius [c] = (double) gd2.getNextNumber();
 			divideBackground [c] = gd2.getNextBoolean();
 			divideBGRadius [c] = (double) gd2.getNextNumber();
+			additionalBlur [c] = gd2.getNextBoolean();
+			additionalBlurRadius [c] = (double) gd2.getNextNumber();
 			chosenAlgorithms [c] = gd2.getNextChoice();
 			customThr [c] = gd2.getNextNumber();
 			chosenStackMethods [c] = gd2.getNextChoice();
@@ -1191,6 +1220,36 @@ static ImagePlus divideByBackground(ImagePlus imp, double radius) {
 	}
 	return outImp;	
 }
+
+static ImagePlus blurGaussian(ImagePlus imp, double radius) {
+	ImagePlus outImp = IJ.createHyperStack("divided image", imp.getWidth(), imp.getHeight(), 
+			imp.getNChannels(), imp.getNSlices(), imp.getNFrames(), imp.getBitDepth());
+	outImp.setCalibration(imp.getCalibration());
+	outImp.setOverlay(imp.getOverlay());
+	ImagePlus tempImp;
+	for(int c = 0; c < imp.getNChannels(); c++) {
+		for(int s = 0; s < imp.getNSlices(); s++) {
+			for(int t = 0; t < imp.getNFrames(); t++) {
+				tempImp = IJ.createHyperStack("temp", imp.getWidth(), imp.getHeight(), 1, 1, 1, imp.getBitDepth());
+				for(int x = 0; x < imp.getWidth(); x++) {
+					for(int y = 0; y < imp.getHeight(); y++) {
+						tempImp.getStack().setVoxel(x, y, 0, imp.getStack().getVoxel(x, y, imp.getStackIndex(c+1 , s+1, t+1)-1));
+					}
+				}
+				tempImp.getProcessor().blurGaussian(radius);
+				for(int x = 0; x < imp.getWidth(); x++) {
+					for(int y = 0; y < imp.getHeight(); y++) {
+						outImp.getStack().setVoxel(x, y, outImp.getStackIndex(c+1, s+1, t+1)-1, 
+								tempImp.getStack().getVoxel(x, y, 0));
+					}
+				}
+			}
+		}
+	}
+	
+	return outImp;	
+}
+
 private void addFooter(TextPanel tp, Date currentDate){
 	tp.append("");
 	tp.append("Datafile was generated on " + FullDateFormatter2.format(currentDate) + " by '"
@@ -1586,6 +1645,9 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 		}else{tp.append("");}
 		if(divideBackground [i]){
 			tp.append("		Divide By Background:	" + df3.format(divideBGRadius[i]));
+		}else{tp.append("");}
+		if(additionalBlur [i]){
+			tp.append("		Additional blur with Gaussian:	" + df3.format(additionalBlurRadius[i]));
 		}else{tp.append("");}
 		if(chosenAlgorithms [i] == "CANNY 3D"){
 			tp.append("		Segmentation method:	" + "Canny 3D Thresholder, a plugin by Sebastian Rassmann,"
