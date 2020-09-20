@@ -502,13 +502,8 @@ public void run(String arg) {
 			   			tempImp = divideByBackground(tempImp, divideBGRadius [c]);
 			   		}
 		   			if(additionalBlur [c]) {
-		   				progress.updateBarText("Blur " + channelIDs [c] + " ...");	
-		   				tempImp.duplicate().show();
+		   				progress.updateBarText("Blur " + channelIDs [c] + " ...");
 		   				tempImp = blurGaussian(tempImp, additionalBlurRadius [c]);
-		   			//TODO verify
-			   			tempImp.show();
-			   			new WaitForUserDialog("check tempImp").show();
-			   			tempImp.hide();
 		   			}
 		   			if(chosenAlgorithms [c].equals("CANNY 3D")){
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with CANNY 3D ...");
