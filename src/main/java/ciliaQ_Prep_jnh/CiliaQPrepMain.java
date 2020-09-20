@@ -888,7 +888,7 @@ private boolean importSettings() {
 						
 						line = br.readLine();	
 						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
-						if(!line.contains("Low threshold method (hysteris thresholding):")) {
+						if(!line.contains("Low threshold method")) {
 							IJ.error("LowThr method not found in Canny settings - no preferences loading!");
 							return false;
 						}
@@ -911,7 +911,7 @@ private boolean importSettings() {
 						IJ.log("C" + actualC + ": low Thr" + cannySettings [actualC].getLowThresholdAlgorithm());
 						
 						line = br.readLine();	
-						if(!line.contains("High threshold method (hysteris thresholding):")) {
+						if(!line.contains("High threshold method")) {
 							IJ.error("HiThr method not found in Canny settings - no preferences loading!");
 							return false;
 						}
@@ -939,7 +939,7 @@ private boolean importSettings() {
 						
 						line = br.readLine();	
 						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
-						if(!line.contains("Low threshold method (hysteris thresholding):")) {
+						if(!line.contains("Low threshold method")) {
 							IJ.error("LowThr method not found in Hysteresis settings - no preferences loading!");
 							return false;
 						}
@@ -963,7 +963,7 @@ private boolean importSettings() {
 						}
 						
 						line = br.readLine();	
-						if(!line.contains("High threshold method (hysteris thresholding):")) {
+						if(!line.contains("High threshold method")) {
 							IJ.error("HiThr method not found in Hysteresis settings - no preferences loading!");
 							return false;
 						}
@@ -1592,21 +1592,21 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 					+ " see https://github.com/sRassmann/canny3d-thresholder for a descriptions.");
 			tp.append("			Gauss sigma:	" + cannySettings[i].getGaussSigma());
 			tp.append("			Canny alpha:	" + cannySettings[i].getCannyAlpha());
-			tp.append("			Low threshold method (hysteris thresholding):	" + cannySettings[i].getLowThresholdAlgorithm());
+			tp.append("			Low threshold method (hysteresis thresholding):	" + cannySettings[i].getLowThresholdAlgorithm());
 			if(cannySettings[i].customValueForLowThreshold()) {
 				tp.append("			Manually selected low threshold:	" + cannySettings[i].getLowThreshold());
 			}
-			tp.append("			High threshold method (hysteris thresholding):	" + cannySettings[i].getHighThresholdAlgorithm());
+			tp.append("			High threshold method (hysteresis thresholding):	" + cannySettings[i].getHighThresholdAlgorithm());
 			if(cannySettings[i].customValueForHighThreshold()) {
 				tp.append("			Manually selected high threshold:	" + cannySettings[i].getHighThreshold());
 			}
 		}else if (chosenAlgorithms [i] == "HYSTERESIS threshold"){
 			tp.append("		Segmentation method:	" + "HYSTERESIS threshold");
-			tp.append("			Low threshold method (hysteris thresholding):	" + chosenLowAlg [i]);
+			tp.append("			Low threshold method (hysteresis thresholding):	" + chosenLowAlg [i]);
 			if(chosenLowAlg [i].equals(hystAlgorithms [0])) {
 				tp.append("			Manually selected low threshold:	" + customLowThr [i]);
 			}
-			tp.append("			High threshold method (hysteris thresholding):	" + chosenHighAlg [i]);
+			tp.append("			High threshold method (hysteresis thresholding):	" + chosenHighAlg [i]);
 			if(chosenHighAlg [i].equals(hystAlgorithms [0])) {
 				tp.append("			Manually selected high threshold:	" + customHighThr [i]);
 			}
