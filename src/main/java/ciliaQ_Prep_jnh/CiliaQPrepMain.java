@@ -736,7 +736,7 @@ public void run(String arg) {
  * Import settings from existing file
  */
 private boolean importSettings() {
-	java.awt.FileDialog fd = new java.awt.FileDialog((Frame) null, "Select files to add to list.");
+	java.awt.FileDialog fd = new java.awt.FileDialog((Frame) null, "Select CQP file to load preferences!");
 	fd.setDirectory(System.getProperty("user.dir", "."));
 	fd.setMultipleMode(false);
 	fd.setMode(FileDialog.LOAD);
