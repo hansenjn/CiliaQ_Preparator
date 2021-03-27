@@ -54,7 +54,12 @@ public class Processing {
 		edges.close();
 
 		IJ.run(bin, "8-bit", "");
-		IJ.run(bin, "3D Fill Holes", "");
+		
+		if(bin.getNSlices()==1) {
+			IJ.run(bin, "Fill Holes", "");				
+		}else {
+			IJ.run(bin, "3D Fill Holes", "");			
+		}
 
 		thrChannel.changes = false;
 		thrChannel.close();

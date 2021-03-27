@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.1.0
+* CiliaQ_Preparator Version 0.1.1
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: September 18, 2020)
+* Date: September 29, 2019 (This Version: March 27, 2021)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -47,7 +47,7 @@ import ij.process.AutoThresholder.Method;
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.1.0";
+	static final String PLUGINVERSION = "0.1.1";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -122,6 +122,9 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	String ChosenNumberFormat = nrFormats[0];
 	
 	ProcessSettings cannySettings [];
+	
+	boolean keepAwake;
+	Robot robo;
 		
 	//-----------------define params for Dialog-----------------
 	
@@ -132,7 +135,7 @@ public void run(String arg) {
 	GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + "");	
 	//show Dialog-----------------------------------------------------------------
 	//.setInsets(top, left, bottom)
-	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
+	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2021 JN Hansen", SuperHeadingFont);
 	gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
 	gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats.", InstructionsFont);
 	gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
@@ -143,6 +146,7 @@ public void run(String arg) {
 	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
 	gd.setInsets(5,0,0);	gd.addChoice("Output image name: ", outputVariant, chosenOutputName);
 	gd.setInsets(5,0,0);	gd.addChoice("output number format", nrFormats, nrFormats[0]);
+	gd.setInsets(5,0,0);	gd.addCheckbox("Keep computer awake during processing", keepAwake);
 	
 	gd.showDialog();
 	//show Dialog-----------------------------------------------------------------
@@ -161,6 +165,8 @@ public void run(String arg) {
 		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
 		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
 	}
+	keepAwake = gd.getNextBoolean();
+	
 	//read and process variables--------------------------------------------------
 	if (gd.wasCanceled()) return;
 	
@@ -381,7 +387,20 @@ public void run(String arg) {
 	
 	
    	ImagePlus imp; 	  	
+   	boolean backgroundPref = Prefs.blackBackground;
+	Prefs.blackBackground =  true;
+	if(keepAwake) {
+   		try {
+			robo = new Robot();
+		} catch (AWTException e) {
+			progress.notifyMessage("Robot that moves the mouse to keep the computer awake could not be hired - Stay-awake mode was disabled.", ProgressDialog.NOTIFICATION);
+		}
+   	}
+	
 	for(int task = 0; task < tasks; task++){
+		if(keepAwake) {
+			stayAwake();
+		}
 		running: while(continueProcessing){
 			Date startDate = new Date();
 			progress.updateBarText("in progress...");
@@ -398,6 +417,10 @@ public void run(String arg) {
 			}
 			//Check for problems
 
+			if(keepAwake) {
+				stayAwake();
+			}
+			
 			//open Image
 		   	try{
 		   		if(selectedTaskVariant.equals(taskVariant[1])){
@@ -442,6 +465,18 @@ public void run(String arg) {
 			}
 		   	//open Image
 		   	
+		   	if(keepAwake) {
+				stayAwake();
+			}
+		   	
+		   	//Checking image
+		   	{
+		   		if(imp.getBitDepth() == 24) {
+		   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": file is an RGB - RGB images cannot be processed! Convert to multi-channel stack for processing!", ProgressDialog.ERROR);
+					progress.moveTask(task);	
+					break running;
+		   		}
+		   	}
 		   	
 		   	//Create Outputfilename
 		   	progress.updateBarText("Create output filename");				
@@ -464,6 +499,9 @@ public void run(String arg) {
 			
 			filePrefix = dir[task] + filePrefix;
 		   	
+			if(keepAwake) {
+				stayAwake();
+			}
 			
 		/******************************************************************
 		*** 						Processing							***	
@@ -483,6 +521,9 @@ public void run(String arg) {
 			//processing
 			int addC = 0;
 		   	for(int c = 0; c < channelIDs.length; c++){
+		   		if(keepAwake) {
+					stayAwake();
+				}
 		   		{
 		   			if(includeDuplicateChannel [c]){
 		   				addC ++;
@@ -497,14 +538,29 @@ public void run(String arg) {
 				   			IJ.run(tempImp, "Subtract Background...", "rolling=" + subtractBGRadius [c]);
 				   		}
 			   		}
+		   			
+		   			if(keepAwake) {
+						stayAwake();
+					}
+		   			
 		   			if(divideBackground [c]){
 		   				progress.updateBarText("Divide by background for channel " + channelIDs [c] + " ...");	
 			   			tempImp = divideByBackground(tempImp, divideBGRadius [c]);
 			   		}
+		   			
+		   			if(keepAwake) {
+						stayAwake();
+					}
+		   			
 		   			if(additionalBlur [c]) {
 		   				progress.updateBarText("Blur " + channelIDs [c] + " ...");
 		   				tempImp = blurGaussian(tempImp, additionalBlurRadius [c]);
 		   			}
+		   			
+		   			if(keepAwake) {
+						stayAwake();
+					}
+		   			
 		   			if(chosenAlgorithms [c].equals("CANNY 3D")){
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with CANNY 3D ...");
 		   				
@@ -555,7 +611,7 @@ public void run(String arg) {
 			   			}
 			   			tempImp.changes = false;
 			   			tempImp.close();
-		   			}	   			
+		   			}
 		   		}
 		   	}
 		   	
@@ -603,6 +659,9 @@ public void run(String arg) {
 			   	String copyStr;
 			   	boolean search;
 		   		for(int c = 0; c < procImp.getNChannels(); c++){
+		   			if(keepAwake) {
+						stayAwake();
+					}
 		   			newLuts [c+cNew] = originalLuts [c];
 		   			search = false;
 					for(int i = 0; i < channelIDs.length; i++){
@@ -614,26 +673,26 @@ public void run(String arg) {
 					if(search){
 						tp1.append("Channel " + (c+1+cNew) + ":	" + "previous channel " + (c+1) + " (segmented)");
 						for(int s = 0; s < procImp.getNSlices(); s++){
-			   					for(int f = 0; f < procImp.getNFrames(); f++){
-			   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
-				   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
-				   					try{
-				   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
-					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
-					   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-					   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
-					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+		   					for(int f = 0; f < procImp.getNFrames(); f++){
+		   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
+			   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
+			   					try{
+			   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
+				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 				   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-					   					}else{
-					   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
-					   					}
-				   					}catch(Exception e){
+				   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
 				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 			   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-				   					}				   					
-				   					tempImp.getStack().setSliceLabel("segm " + copyStr, indexNew+1);
-			   					}
-							}
+				   					}else{
+				   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+				   					}
+			   					}catch(Exception e){
+			   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
+		   							+  " T" + (f+1) + "/" + procImp.getNFrames();
+			   					}				   					
+			   					tempImp.getStack().setSliceLabel("segm " + copyStr, indexNew+1);
+		   					}
+						}
 						
 						for(int i = 0; i < channelIDs.length; i++){
 							if(c+1 == channelIDs [i] && includeDuplicateChannel [i]){
@@ -690,16 +749,20 @@ public void run(String arg) {
 					}
 				}
 		   		
-		   		CompositeImage ci = (CompositeImage)tempImp;
-				ci.setDisplayMode(IJ.COMPOSITE);
-			    ci.setLuts(newLuts);
+		   		if(keepAwake) {
+					stayAwake();
+				}
+		   		
+	   			CompositeImage ci = (CompositeImage) tempImp;
+	   			ci.setDisplayMode(IJ.COMPOSITE);
+	   			ci.setLuts(newLuts);
 				IJ.saveAsTiff(ci, filePrefix + ".tif");
-		   		procImp.changes = false;
+				procImp.changes = false;
 		   		procImp.close();
 		   		tempImp.changes = false;
 				tempImp.close();
 				ci.changes = false;
-				ci.close();
+				ci.close();	   			
 		   	}else{
 				IJ.saveAsTiff(procImp, filePrefix + ".tif");	
 				procImp.changes = false;
@@ -730,6 +793,7 @@ public void run(String arg) {
 		progress.setBar(1.0);
 		progress.moveTask(task);
 	}
+	Prefs.blackBackground = backgroundPref;
 }
 
 /**
@@ -748,6 +812,7 @@ private boolean importSettings() {
 	}	
 
 	//read general settings
+	IJ.log("READING PREFERENCES:");
 	nChannels = 0;
 	try {
 		FileReader fr = new FileReader(settingsFile);
@@ -761,7 +826,7 @@ private boolean importSettings() {
 				}
 			}catch(Exception e){
 				break reading;
-			}					
+			}
 			
 			if(line.contains("Segmentation style")) {
 				for(int i = 0; i < intensityVariant.length; i ++) {
@@ -771,7 +836,8 @@ private boolean importSettings() {
 				}
 				if(chosenImageStyle.equals(intensityVariant [0])){
 					keepIntensities = true;
-				}						
+				}
+				IJ.log("Segmentation style = " + chosenImageStyle);
 			}
 			
 			if(line.contains("Segmented channel")) {
@@ -809,7 +875,6 @@ private boolean importSettings() {
 	boolean channelReading = false;
 	int actualC = -1;
 	String tempString;
-	IJ.log("READING PREFERENCES:");
 	try {
 		FileReader fr = new FileReader(settingsFile);
 		BufferedReader br = new BufferedReader(fr);
@@ -822,7 +887,7 @@ private boolean importSettings() {
 				}
 			}catch(Exception e){
 				break reading;
-			}					
+			}
 			
 			if(line.contains("Segmented channel")) {
 				channelReading = true;
@@ -1064,7 +1129,7 @@ private boolean enterSettings() {
 		GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters");	
 		//show Dialog-----------------------------------------------------------------
 		//.setInsets(top, left, bottom)
-		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
+		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2021 JN Hansen", SuperHeadingFont);
 		gd.setInsets(5,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
 		gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
 		gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
@@ -1149,7 +1214,7 @@ private boolean enterSettings() {
 			GenericDialog gd2 = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
 			//show Dialog-----------------------------------------------------------------
 			//.setInsets(top, left, bottom)
-			gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2020 JN Hansen", SuperHeadingFont);
+			gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2021 JN Hansen", SuperHeadingFont);
 			gd2.setInsets(0,0,0);	gd2.addMessage("Select the preferences for channel to be segmented "+ (c+1) + " here.", InstructionsFont);
 			
 			gd2.setInsets(0,10,0);	gd2.addNumericField("Channel Nr (>= 1 & <= nr of channels)", c+1, 0);
@@ -1190,19 +1255,28 @@ private boolean enterSettings() {
 		return true;
 	}
 
-static ImagePlus divideByBackground(ImagePlus imp, double radius) {
+ImagePlus divideByBackground(ImagePlus imp, double radius) {
 	ImagePlus outImp = IJ.createHyperStack("divided image", imp.getWidth(), imp.getHeight(), 1, imp.getNSlices(), imp.getNFrames(), 32);
 	outImp.setCalibration(imp.getCalibration());
 	outImp.setOverlay(imp.getOverlay());
 	ImagePlus tempImp;
 	for(int s = 0; s < imp.getNSlices(); s++) {
 		for(int t = 0; t < imp.getNFrames(); t++) {
+			if(keepAwake) {
+				stayAwake();
+			}
+			
 			tempImp = IJ.createHyperStack("temp", imp.getWidth(), imp.getHeight(), 1, 1, 1, imp.getBitDepth());
 			for(int x = 0; x < imp.getWidth(); x++) {
 				for(int y = 0; y < imp.getHeight(); y++) {
 					tempImp.getStack().setVoxel(x, y, 0, imp.getStack().getVoxel(x, y, imp.getStackIndex(1 , s+1, t+1)-1));
 				}
 			}
+			
+			if(keepAwake) {
+				stayAwake();
+			}
+			
 			tempImp.getProcessor().blurGaussian(radius);
 			for(int x = 0; x < imp.getWidth(); x++) {
 				for(int y = 0; y < imp.getHeight(); y++) {
@@ -1216,7 +1290,7 @@ static ImagePlus divideByBackground(ImagePlus imp, double radius) {
 	return outImp;	
 }
 
-static ImagePlus blurGaussian(ImagePlus imp, double radius) {
+ImagePlus blurGaussian(ImagePlus imp, double radius) {
 	ImagePlus outImp = IJ.createHyperStack("divided image", imp.getWidth(), imp.getHeight(), 
 			imp.getNChannels(), imp.getNSlices(), imp.getNFrames(), imp.getBitDepth());
 	outImp.setCalibration(imp.getCalibration());
@@ -1225,6 +1299,10 @@ static ImagePlus blurGaussian(ImagePlus imp, double radius) {
 	for(int c = 0; c < imp.getNChannels(); c++) {
 		for(int s = 0; s < imp.getNSlices(); s++) {
 			for(int t = 0; t < imp.getNFrames(); t++) {
+				if(keepAwake) {
+					stayAwake();
+				}
+				
 				tempImp = IJ.createHyperStack("temp", imp.getWidth(), imp.getHeight(), 1, 1, 1, imp.getBitDepth());
 				for(int x = 0; x < imp.getWidth(); x++) {
 					for(int y = 0; y < imp.getHeight(); y++) {
@@ -1267,7 +1345,7 @@ private String getOneRowFooter(Date currentDate){
 /**
  * @param channel: 1 <= channel <= # channels
  * */
-private static ImagePlus copyChannel(ImagePlus imp, int channel, boolean adjustDisplayRangeTo16bit, boolean copyOverlay){
+private ImagePlus copyChannel(ImagePlus imp, int channel, boolean adjustDisplayRangeTo16bit, boolean copyOverlay){
 	ImagePlus impNew = IJ.createHyperStack("channel image", imp.getWidth(), imp.getHeight(), 1, imp.getNSlices(), imp.getNFrames(), imp.getBitDepth());
 	int index = 0, indexNew = 0;
 	
@@ -1338,10 +1416,18 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, 
 	int indexSelected, indexWriteImp;
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
 	for(int t = 0; t < channelImp.getNFrames(); t++){
+		if(keepAwake) {
+			stayAwake();
+		}
+		
 		/*
 		 * Extract single time point and 
 		 * */
 		selectedImp = getSelectedTimepoints(channelImp, t+1, t+1, false);	
+		
+		if(keepAwake) {
+			stayAwake();
+		}
 		
 		/*
 		 * Convert using the Canny 3D plugin by S. Rassmann: 
@@ -1354,6 +1440,9 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, 
 		 * Write back to image
 		 * */		
 		for(int s = 0; s < selectedImp.getNSlices(); s++){
+			if(keepAwake) {
+				stayAwake();
+			}
 			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
 			indexWriteImp = writeImp.getStackIndex(channelWriteImp, s+1, t+1)-1;
 			for(int x = 0; x < selectedImp.getWidth(); x++){
@@ -1382,6 +1471,10 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressDialog progres
 	int indexSelected, indexWriteImp;
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
 	for(int t = 0; t < channelImp.getNFrames(); t++){
+		if(keepAwake) {
+			stayAwake();
+		}
+		
 		/*
 		 * Extract single time point and 
 		 * */
@@ -1396,6 +1489,9 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressDialog progres
 		 * Write back to image
 		 * */		
 		for(int s = 0; s < selectedImp.getNSlices(); s++){
+			if(keepAwake) {
+				stayAwake();
+			}
 			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
 			indexWriteImp = writeImp.getStackIndex(channelWriteImp, s+1, t+1)-1;
 			for(int x = 0; x < selectedImp.getWidth(); x++){
@@ -1434,12 +1530,14 @@ private ImagePlus doHysteresisThreshold(ImagePlus imp, ProgressDialog pD, double
 private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, boolean seperateTimeSteps, ProgressDialog progress){
 	int startGroup = 1, endGroup = imp.getNFrames();
 	ImagePlus selectedImp;
-	double thresholds [][] = new double [1][2]; // first dim: image, 2nd dim: 0 = low, 1 = high
-	Arrays.fill(thresholds[0],Double.NaN);
+//	double thresholds [][] = new double [1][2]; // first dim: image, 2nd dim: 0 = low, 1 = high
+//	Arrays.fill(thresholds[0],Double.NaN);
 	
-	if(seperateTimeSteps){
-		thresholds = new double [endGroup-startGroup+1][2];
-	}
+//	if(seperateTimeSteps){
+//		thresholds = new double [endGroup-startGroup+1][2];
+//	}
+	double thresholds [][] = new double [endGroup-startGroup+1][2];
+	
 	String chosenAlg = "";
 	for(int i = 0; i < 2; i++) {
 		if(i == 0) {
@@ -1486,9 +1584,10 @@ private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, bool
 			}else{
 				thresholds [0][i] = getSingleSliceImageThreshold(selectedImp, 1, chosenAlg);	
 			}
-			for(int t = startGroup; t < endGroup; t++){
-				thresholds [t-(startGroup-1)][i] = thresholds [0][i];
+			for(int t = 0; t < thresholds.length; t++){
+				thresholds [t][i] = thresholds [0][i];				
 			}
+			
 			progress.addToBar(0.8);
 			selectedImp.changes = false;
 			selectedImp.close();			
@@ -1503,7 +1602,7 @@ private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, bool
  * startSlice = first slice included into projection (1 < startSlice < NSlices)
  * endSlice = last slice included into projection (1 < endSlice < NSlices)
  * */
-private static ImagePlus maximumProjection(ImagePlus imp, int startSlice, int endSlice){
+private ImagePlus maximumProjection(ImagePlus imp, int startSlice, int endSlice){
 	//reset borders, if indicated start / end does not fit stack size
 	if(startSlice < 1)	startSlice=1;
 	if(endSlice > imp.getStackSize())	endSlice = imp.getStackSize();
@@ -1545,12 +1644,15 @@ private double getSingleSliceImageThreshold (ImagePlus imp, int s, String chosen
  * @return a new ImagePlus exlusively containing the selected <timepoint> of the ImagePlus <imp>
  * Range of <timepoint>: 1 <= timepoint <= imp.getNFrames()
  * */
-private static ImagePlus getSelectedTimepoints (ImagePlus imp, int firstTimepoint, int lastTimepoint, boolean copyOverlay){
+private ImagePlus getSelectedTimepoints (ImagePlus imp, int firstTimepoint, int lastTimepoint, boolean copyOverlay){
 	ImagePlus outImp = IJ.createHyperStack("Selected Timepoints", imp.getWidth(), imp.getHeight(),
 			imp.getNChannels(), imp.getNSlices(), lastTimepoint-firstTimepoint+1, imp.getBitDepth());
 //	outImp.setOpenAsHyperStack(true);
 	int zO, zN;
 	for(int t = firstTimepoint; t <= lastTimepoint; t++){
+		if(keepAwake) {
+			stayAwake();
+		}
 		for(int x = 0; x < imp.getWidth(); x++){
 			for(int y = 0; y < imp.getHeight(); y++){
 				for(int s = 0; s < imp.getNSlices(); s++){
@@ -1685,5 +1787,9 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 		}	
 	}
 	tp.append("");
+}
+
+private void stayAwake() {
+	robo.mouseMove(MouseInfo.getPointerInfo().getLocation().x, MouseInfo.getPointerInfo().getLocation().y);
 }
 }//end main class
