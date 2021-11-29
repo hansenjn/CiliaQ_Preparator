@@ -3,7 +3,7 @@ An ImageJ plugin to prepare images for analysis with [CiliaQ](https://github.com
 
 Copyright (C) 2019-2020: Jan N. Hansen (contact: jan.hansen (at) uni-bonn.de).
 
-CiliaQ_Preparator has been developed in the research group [Biophysical Imaging, Institute of Innate Immunity, Bonn, Germany](http://www.iii.uni-bonn.de/en/wachten_lab/).
+CiliaQ_Preparator has been developed in the research group [Biophysical Imaging, Institute of Innate Immunity, Bonn, Germany](https://www.iiibonn.de/dagmar-wachten-lab/dagmar-wachten-lab-science).
 
 ## Download
 Download the latest version of the CiliaQ_Preparator plugin file (.jar file) from the [release page](https://github.com/hansenjn/CiliaQ_Preparator/releases).
