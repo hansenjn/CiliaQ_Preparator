@@ -55,9 +55,9 @@ public class ProcessSettings {
 		
 		gd.setInsets(0,0,0);	gd.addNumericField("Sigma for Gaussian blur (pixels)", inst.gaussSigma, 4);
 		gd.setInsets(0,0,0);	gd.addNumericField("Alpha (sensitivity for edge detection)", inst.cannyAlpha, 4);
-		gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", thrAlgorithms, inst.highThrAlgorithm);
+		gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", thrAlgorithms, inst.highThrAlgorithm);
 		gd.setInsets(0,0,0);	gd.addNumericField("Value (if custom value is chosen)", inst.highThr, 8);
-		gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", thrAlgorithms, inst.lowThrAlgorithm);
+		gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", thrAlgorithms, inst.lowThrAlgorithm);
 		gd.setInsets(0,0,0);	gd.addNumericField("Value (if custom value is chosen)", inst.lowThr, 8);
 
 		// show Dialog-----------------------------------------------------------------
