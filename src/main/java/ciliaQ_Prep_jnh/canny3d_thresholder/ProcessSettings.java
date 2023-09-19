@@ -11,7 +11,8 @@ import ij.gui.GenericDialog;
  * This code was retrieved from https://github.com/sRassmann/canny3d-thresholder, version v0.1.0,
  * and was adapted by 
  * @author Jan N. Hansen
- * to fit into the CiliaQ_Preparator. 
+ * to fit into the CiliaQ_Preparator.
+ * Last modification: Sep 18, 2023. 
  */
 public class ProcessSettings {	
 	static String pluginName = "Canny 3D Thresholder"; 
@@ -45,7 +46,7 @@ public class ProcessSettings {
 	public static ProcessSettings initByGD(String Task) throws Exception {
 		ProcessSettings inst = new ProcessSettings(); // returned instance of ImageSetting class
 		GenericDialog gd = new GenericDialog(pluginName + " - Image Processing Settings");
-		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann)",
+		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann), modified by J.N. Hansen (last mod.: Sep 18, 2023)",
 				new Font("Sansserif", Font.BOLD, 14));
 		gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
 		gd.setInsets(0,0,0);	gd.addMessage("Canny 3D Thresholder requires the installation of additional packages in your FIJI/ImageJ distribution.", new Font("Sansserif", 2, 12));
@@ -54,9 +55,9 @@ public class ProcessSettings {
 		
 		gd.setInsets(0,0,0);	gd.addNumericField("Sigma for Gaussian blur (pixels)", inst.gaussSigma, 4);
 		gd.setInsets(0,0,0);	gd.addNumericField("Alpha (sensitivity for edge detection)", inst.cannyAlpha, 4);
-		gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", thrAlgorithms, inst.highThrAlgorithm);
+		gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", thrAlgorithms, inst.highThrAlgorithm);
 		gd.setInsets(0,0,0);	gd.addNumericField("Value (if custom value is chosen)", inst.highThr, 8);
-		gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", thrAlgorithms, inst.lowThrAlgorithm);
+		gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", thrAlgorithms, inst.lowThrAlgorithm);
 		gd.setInsets(0,0,0);	gd.addNumericField("Value (if custom value is chosen)", inst.lowThr, 8);
 
 		// show Dialog-----------------------------------------------------------------
