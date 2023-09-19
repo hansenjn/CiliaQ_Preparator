@@ -38,13 +38,13 @@ public class Processing {
 		if (pS.lowThrAlgorithm == "Custom") {
 			lowThr = pS.lowThr; // use custom value
 		} else {
-			IJ.setAutoThreshold(edges, pS.highThrAlgorithm + " dark stack");
+			IJ.setAutoThreshold(edges, pS.lowThrAlgorithm + " dark stack");
 			lowThr = edges.getProcessor().getMinThreshold(); // calculate from stack
 		}
 		if (pS.highThrAlgorithm == "Custom") {
 			highThr = pS.highThr; // use custom value
 		} else {
-			IJ.setAutoThreshold(edges, pS.lowThrAlgorithm + " dark stack");
+			IJ.setAutoThreshold(edges, pS.highThrAlgorithm + " dark stack");
 			highThr = edges.getProcessor().getMinThreshold(); // calculate from stack
 		}
 
