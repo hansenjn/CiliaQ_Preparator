@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.1.1
+* CiliaQ_Preparator Version 0.1.2
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -47,7 +47,7 @@ import ij.process.AutoThresholder.Method;
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.1.1";
+	static final String PLUGINVERSION = "0.1.2";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -1517,10 +1517,11 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressDialog progres
  * */
 private ImagePlus doHysteresisThreshold(ImagePlus imp, ProgressDialog pD, double thresholds []) {
 	pD.updateBarText("Hysteresis threshold - segmentation running");
-	
+	imp.show();
 	IJ.run(imp, "3D Hysteresis Thresholding", "high=" + thresholds [1] + " low=" + thresholds [0]);
 	ImagePlus bin = WindowManager.getCurrentImage();
 	bin.hide();
+	imp.hide();
 	return bin;
 }
 
