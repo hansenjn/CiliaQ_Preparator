@@ -462,12 +462,10 @@ public void run(String arg) {
 			//Check for problems
 			if(name[task].contains(".") && name[task].substring(name[task].lastIndexOf("."),name[task].length()).equals(".txt")){
 				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": A file is no image! Could not be processed!", ProgressDialog.ERROR);
-				progress.moveTask(task);	
 				break running;
 			}
 			if(name[task].contains(".") && name[task].substring(name[task].lastIndexOf("."),name[task].length()).equals(".zip")){	
 				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": A file is no image! Could not be processed!", ProgressDialog.ERROR);
-				progress.moveTask(task);	
 				break running;
 			}
 			//Check for problems
@@ -515,7 +513,6 @@ public void run(String arg) {
 		   		}
 		   	}catch (Exception e) {
 		   		progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": file is no image - could not be processed!", ProgressDialog.ERROR);
-				progress.moveTask(task);	
 				break running;
 			}
 		   	//open Image
@@ -528,7 +525,6 @@ public void run(String arg) {
 		   	{
 		   		if(imp.getBitDepth() == 24) {
 		   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": file is an RGB - RGB images cannot be processed! Convert to multi-channel stack for processing!", ProgressDialog.ERROR);
-					progress.moveTask(task);	
 					break running;
 		   		}
 		   		
@@ -625,9 +621,24 @@ public void run(String arg) {
 		   			
 		   			if(chosenAlgorithms [c].equals("CANNY 3D")){
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with CANNY 3D ...");
-		   				
-		   				segmentUsingCanny3D(tempImp, progress, cannySettings [c], procImp, channelIDs [c]); 				
-		   							
+		   				try {
+		   					segmentUsingCanny3D(tempImp, progress, cannySettings [c], procImp, channelIDs [c]); 				   				
+			   			}catch(Exception e) {
+			   				String out = "";
+							for (int err = 0; err < e.getStackTrace().length; err++) {
+								out += " \n " + e.getStackTrace()[err].toString();
+							}
+			   				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Applying Canny 3D failed."
+			   						+ "\nVerify that you have the 3D ImageJ Suite installed - for more information see"
+			   						+ "\nhttps://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ"
+			   						+ "\nIf you had the 3D ImageJ Suite installed, please report the following information as an issue on the CiliaQ github page or contact developer with the error information:"
+									+ "\nError message: " + e.getMessage()
+									+ "\nError localized message: " + e.getLocalizedMessage()
+									+ "\nError cause: " + e.getCause() 
+									+ "\nDetailed message:"
+									+ "\n" + out, ProgressDialog.ERROR);
+							break running;
+			   			}		   				
 			   			tempImp.changes = false;
 			   			tempImp.close();
 		   			}else if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
@@ -638,9 +649,25 @@ public void run(String arg) {
 			   			for(int t = 0; t < procImp.getNFrames(); t++){
 		   					tp1.append("	" + df0.format(t+1) + "	" + df3.format(thresholdsHyst[t][0]) + "	" + df3.format(thresholdsHyst[t][1]));				
 			   			}
-
-			   			segmentUsingHysteresis(tempImp, progress, thresholdsHyst, procImp, channelIDs [c]); 				
-
+			   			
+			   			try {
+				   			segmentUsingHysteresis(tempImp, progress, thresholdsHyst, procImp, channelIDs [c]);			   				
+			   			}catch(Exception e) {
+			   				String out = "";
+							for (int err = 0; err < e.getStackTrace().length; err++) {
+								out += " \n " + e.getStackTrace()[err].toString();
+							}
+			   				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Hysteresis Thresholding failed."
+			   						+ "\nVerify that you have the 3D ImageJ Suite installed - for more information see"
+			   						+ "\nhttps://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ"
+			   						+ "\nIf you had the 3D ImageJ Suite installed, please report the following information as an issue on the CiliaQ github page or contact developer with the error information:"
+									+ "\nError message: " + e.getMessage()
+									+ "\nError localized message: " + e.getLocalizedMessage()
+									+ "\nError cause: " + e.getCause() 
+									+ "\nDetailed message:"
+									+ "\n" + out, ProgressDialog.ERROR);
+							break running;
+			   			}
 			   			tempImp.changes = false;
 			   			tempImp.close();
 		   			}else {
@@ -1847,12 +1874,13 @@ private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impT
 private boolean requestHysteresisPrefs(String Task, int c) {
 	GenericDialog gd = new GenericDialog(PLUGINNAME + " - Hysteresis thresholding");
 	gd.addMessage(PLUGINNAME + " - Version " + PLUGINVERSION + "",
-			new Font("Sansserif", Font.BOLD, 14));
+			SuperHeadingFont);
 	gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
-	gd.setInsets(0,0,0);	gd.addMessage("Hysteresis thresholding requires the '3D ImageJ suite' (https://imagejdocu.tudor.lu/plugin/stacks/3d_ij_suite/start#download).", new Font("Sansserif", 2, 12));
-	gd.setInsets(0,0,0);	gd.addMessage("Please install the plugins and core from '3D ImageJ suite' to use this function in CiliaQ Preparator!", new Font("Sansserif", 2, 12));
+	gd.setInsets(0,0,0);	gd.addMessage("Hysteresis thresholding requires the '3D ImageJ suite' (https://imagej.net/plugins/3d-imagej-suite/).", new Font("Sansserif", 2, 12));
+	gd.setInsets(0,0,0);	gd.addMessage("If you have not installed it yet, please install the '3D ImageJ suite' as explained in the CiliaQ Wiki:", new Font("Sansserif", 2, 12));
+	gd.setInsets(0,0,0);	gd.addMessage("https://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ", new Font("Sansserif", 2, 12));
 	
-	gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", hystAlgorithms, chosenLowAlg [c]);
+	gd.setInsets(20,0,0);	gd.addChoice("Select method for low threshold", hystAlgorithms, chosenLowAlg [c]);
 	gd.setInsets(0,0,0);	gd.addNumericField("Low threshold (if 'CUSTOM threshold' is chosen)", customLowThr [c], 5);
 	gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", hystAlgorithms, chosenHighAlg [c]);
 	gd.setInsets(0,0,0);	gd.addNumericField("High threshold (if 'CUSTOM threshold' is chosen)", customHighThr [c], 5);
