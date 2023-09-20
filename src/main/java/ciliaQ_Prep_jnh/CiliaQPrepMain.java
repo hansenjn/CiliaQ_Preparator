@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: March 27, 2021)
+* Date: September 29, 2019 (This Version: September 19, 2023)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -28,7 +28,6 @@ import java.io.IOException;
 import java.util.*;
 import java.text.*;
 
-import javax.swing.JFileChooser;
 import javax.swing.UIManager;
 
 import ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings;
@@ -39,7 +38,6 @@ import ij.measure.*;
 import ij.plugin.*;
 import ij.process.LUT;
 import ij.text.*;
-import loci.formats.FormatException;
 import loci.plugins.BF;
 import loci.plugins.in.ImporterOptions;
 import ij.process.AutoThresholder.Method;
@@ -135,7 +133,7 @@ public void run(String arg) {
 	GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + "");	
 	//show Dialog-----------------------------------------------------------------
 	//.setInsets(top, left, bottom)
-	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2021 JN Hansen", SuperHeadingFont);
+	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
 	gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
 	gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats.", InstructionsFont);
 	gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
@@ -265,38 +263,94 @@ public void run(String arg) {
 				dir[task] = od.filesToOpen.get(task).getParent() + System.getProperty("file.separator");
 			}		
 		}else if(selectedTaskVariant.equals(taskVariant[0])){
-			if(WindowManager.getIDList()==null){
-				new WaitForUserDialog("Plugin canceled - no image open in FIJI!").show();
-				return;
-			}
-			FileInfo info = WindowManager.getCurrentImage().getOriginalFileInfo();
-			name [0] = info.fileName;	//get name
-			dir [0] = info.directory;	//get directory
-			tasks = 1;
-		}else if(selectedTaskVariant.equals(taskVariant[2])){	// all open images
-			if(WindowManager.getIDList()==null){
-				new WaitForUserDialog("Plugin canceled - no image open in FIJI!").show();
-				return;
-			}
-			int IDlist [] = WindowManager.getIDList();
-			tasks = IDlist.length;	
-			if(tasks == 1){
-				selectedTaskVariant=taskVariant[0];
+			try {
+				if(WindowManager.getIDList()==null){
+					new WaitForUserDialog("Plugin canceled - no image open in FIJI!").show();
+					return;
+				}
+				if(WindowManager.getCurrentImage().changes) {
+					new WaitForUserDialog("Plugin canceled - the active image had unsaved changes!"
+							+ "\nCiliaQ can only process images that are saved!"
+							+ "\nSave the image and retry running CiliaQ_Preparator...").show();
+					return;
+				}
 				FileInfo info = WindowManager.getCurrentImage().getOriginalFileInfo();
 				name [0] = info.fileName;	//get name
 				dir [0] = info.directory;	//get directory
-			}else{
-				name = new String [tasks];
-				dir = new String [tasks];
-				allImps = new ImagePlus [tasks];
-				for(int i = 0; i < tasks; i++){
-					allImps[i] = WindowManager.getImage(IDlist[i]); 
-					FileInfo info = allImps[i].getOriginalFileInfo();
-					name [i] = info.fileName;	//get name
-					dir [i] = info.directory;	//get directory
-				}		
-			}
-					
+				tasks = 1;
+			}catch(Exception e) {
+				new WaitForUserDialog("Unclear error when loading the active image!"
+						+ "\nTry to restart FIJI, open the image again, and run CiliaQ_Preparator again!"
+						+ "\nDetailed debugging information printed to LOG window.").show();
+
+				String out = "";
+				for (int err = 0; err < e.getStackTrace().length; err++) {
+					out += " \n " + e.getStackTrace()[err].toString();
+				}
+				IJ.log("Detailed debugging information:"
+						+ "\nError message: " + e.getMessage()
+						+ "\nError localized message: " + e.getLocalizedMessage()
+						+ "\nError cause: " + e.getCause() 
+						+ "\nDetailed message:"
+						+ "\n" + out);
+				
+				return;
+			}			
+		}else if(selectedTaskVariant.equals(taskVariant[2])){	// all open images
+			try {
+				if(WindowManager.getIDList()==null){
+					new WaitForUserDialog("Plugin canceled - no image open in FIJI!").show();
+					return;
+				}
+				int IDlist [] = WindowManager.getIDList();
+				tasks = IDlist.length;	
+				if(tasks == 1){
+					selectedTaskVariant=taskVariant[0];
+					if(WindowManager.getCurrentImage().changes) {
+						new WaitForUserDialog("Plugin canceled - the active image had unsaved changes!"
+								+ "\nCiliaQ can only process images that are saved!"
+								+ "\nSave the image and retry running CiliaQ_Preparator...").show();
+						return;
+					}
+					FileInfo info = WindowManager.getCurrentImage().getOriginalFileInfo();
+					name [0] = info.fileName;	//get name
+					dir [0] = info.directory;	//get directory
+				}else{
+					name = new String [tasks];
+					dir = new String [tasks];
+					allImps = new ImagePlus [tasks];
+					for(int i = 0; i < tasks; i++){
+						allImps[i] = WindowManager.getImage(IDlist[i]);
+						if(allImps[i].changes) {
+							new WaitForUserDialog("Plugin canceled - one active image had unsaved changes!"
+									+ "\nCiliaQ can only process images that are saved!"
+									+ "\nSave the image and retry running CiliaQ_Preparator..."
+									+ "\n\nTitle of the unsaved image: " + allImps[i].getTitle()).show();
+							return;
+						}
+						FileInfo info = allImps[i].getOriginalFileInfo();
+						name [i] = info.fileName;	//get name
+						dir [i] = info.directory;	//get directory
+					}		
+				}
+			}catch(Exception e) {
+				new WaitForUserDialog("Unclear error when loading the active images!"
+						+ "\nTry to restart FIJI, open the images again, and run CiliaQ_Preparator again!"
+						+ "\nDetailed debugging information printed to LOG window.").show();
+				
+				String out = "";
+				for (int err = 0; err < e.getStackTrace().length; err++) {
+					out += " \n " + e.getStackTrace()[err].toString();
+				}
+				IJ.log("Detailed debugging information:"
+						+ "\nError message: " + e.getMessage()
+						+ "\nError localized message: " + e.getLocalizedMessage()
+						+ "\nError cause: " + e.getCause() 
+						+ "\nDetailed message:"
+						+ "\n" + out);
+				
+				return;
+			}					
 		}
 	}
 	
@@ -389,6 +443,7 @@ public void run(String arg) {
    	ImagePlus imp; 	  	
    	boolean backgroundPref = Prefs.blackBackground;
 	Prefs.blackBackground =  true;
+	boolean isVirtual;
 	if(keepAwake) {
    		try {
 			robo = new Robot();
@@ -475,6 +530,13 @@ public void run(String arg) {
 		   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": file is an RGB - RGB images cannot be processed! Convert to multi-channel stack for processing!", ProgressDialog.ERROR);
 					progress.moveTask(task);	
 					break running;
+		   		}
+		   		
+		   		isVirtual = false;
+		   		if(imp.getStack().isVirtual()) {
+		   			isVirtual = true;
+		   			imp = imp.duplicate();
+		   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Image " + name [task] + " was a virtual stack image. Copied into work space for processing!", ProgressDialog.LOG);
 		   		}
 		   	}
 		   	
@@ -781,7 +843,7 @@ public void run(String arg) {
 		*******************************************************************/			
 			{
 				imp.unlock();	
-				if(selectedTaskVariant.equals(taskVariant[1])){
+				if(selectedTaskVariant.equals(taskVariant[1]) || isVirtual){
 					imp.changes = false;
 					imp.close();
 				}
@@ -999,7 +1061,7 @@ private boolean importSettings() {
 						if(cannySettings [actualC].getHighThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
 							if(!line.contains("Manually selected high threshold:")){
-								IJ.error("Could not find manual lowThr in Canny settings - no preferences loaded!");
+								IJ.error("Could not find manual highThr in Canny settings - no preferences loaded!");
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1106,7 +1168,94 @@ private boolean importSettings() {
 					}
 					if(!line.equals("") && line.equals(null)){ break reading;}
 				}
-			}			
+			}
+			
+			if(line.contains("Plug-in version:")) {
+				String version = line.substring(line.lastIndexOf("V"));
+				IJ.log("Loaded settings stem from a CiliaQ Preparator run with Version " + version + ".");
+				/**
+				 * In Version V0.1.2, bugs in the generic dialog for Canny3D settings have been corrected.
+				 * For downwards compatibility, some settings need to be adjusted when reading in an analysis from older versions.
+				 * This is done here.
+				 */
+				if(version.equals("V0.1.1") || version.equals("V0.1.0") || version.equals("V0.0.6") || version.equals("V0.0.5") || version.equals("V0.0.4") || version.equals("V0.0.3") || version.equals("V0.0.2")) {
+					IJ.log("Detected that setting loaded stems from an older CiliaQ Preparator version (Version " + version + ")");
+					for(int c = 0; c < chosenAlgorithms.length; c++) {
+						if(chosenAlgorithms [c] == algorithm [17]) {
+							String tempLowAlg = cannySettings [c].getLowThresholdAlgorithm();
+							String tempHighAlg = cannySettings [c].getHighThresholdAlgorithm();
+							
+							/*
+							 * In versions before V0.1.2, in the Canny settings the algorithm labels were swapped in the generic dialog
+							 * Thus, what was entered as indicated left ended up in as indicated right
+							 * low thr alg			>		high thr alg
+							 * custom value 		>		low thr
+							 * high thr alg			>		low thr alg
+							 * custom value 		>		high thr
+							 * Later in the processing however a low thr alg other than "Custom" would be used as high threshold and vice versa
+							 * Before version V0.1.1 import worked fine since loading and writing settings was still correct in these versions.
+							 * From version V0.1.2, all labels have been corrected and the bug in the processing has been corrected,
+							 * thus, to be compatible with older versions, we need to perform some import corrections.							 *  
+							 * */
+							if(!tempLowAlg.equals(ProcessSettings.thrAlgorithms[0]) && !tempHighAlg.equals(ProcessSettings.thrAlgorithms[0])) {
+								/**
+								 * We just need read in algorithms
+								 */
+								cannySettings [c].setLowThresholdAlgorithm(tempHighAlg);
+								cannySettings [c].setHighThresholdAlgorithm(tempLowAlg);
+								IJ.log("C" + c + ": low Thr and high Thr methods were swapped to reproduce performance of the older version of CiliaQ (" + version + ") for which the loaded setting was used"
+										+ " (for more details see release notes at https://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2 ):");
+								IJ.log("C" + c + ": adjusted low Thr method:" + cannySettings [c].getLowThresholdAlgorithm());
+								IJ.log("C" + c + ": adjusted high Thr method:" + cannySettings [c].getHighThresholdAlgorithm());
+							}else if(tempLowAlg.equals(ProcessSettings.thrAlgorithms[0]) && tempHighAlg.equals(ProcessSettings.thrAlgorithms[0])) {
+								/**
+								 * Nothing needs to be swapped since low and high Thr values were correctly entered and applied
+								 */
+							}else {
+								/**
+								 * In this case, one of the threshold values was indicated but not used and instead 0.0 was used, which will likely have completely failed Canny 3D processing.
+								 * It is not likely that this ever was used, but to be fully compatible, we will import it correctly.								 * 
+								 */
+								if(tempLowAlg.equals(ProcessSettings.thrAlgorithms[0]) && !tempHighAlg.equals(ProcessSettings.thrAlgorithms[0])) {
+									/** 
+									 * Low was set custom and value entered, high was other, value 0.0
+									 * Old version consequence: high is custom, high value 0.0, low is SomeAlg, low value someValueButNotStored
+									 * Application:
+									 * Low thr is some alg and will apply custom alg, which cannot be find - a random conversion to mask will appear
+									 * High thr is custom and will apply 0.0
+									 * Final consequence, all pixels above 0.0 in EdgeAndSymmetry filtered image will be applied and become 0.0
+									 * This setting cannot be reproduced with CiliaQ Preparator of this version since this whole procedure is not reproducible. 
+									 */
+								}else {
+									/** 
+									 * High was set custom and value entered, low was other, value 0.0
+									 * Old version consequence: low is custom, low value 0.0, high is SomeAlg, high value someValueButNotStored
+									 * Application:
+									 * Low thr is custom and will apply 0.0
+									 * High thr is someAlg and will apply custom alg, which cannot be find - a random conversion to mask will appear as high
+									 * Outcome unpredictable
+									 * Final consequence, unpredictable
+									 * This setting cannot be reproduced with CiliaQ Preparator of this version since this whole procedure is not reproducible. 
+									 */									
+								}
+								IJ.log("CiliaQ_Preparator cannot finally import this setting since it is from an older CiliaQ Preparator version (" + version + ") and running"
+										+ "\nCiliaQ_Preparator version " + version + " with this setting was affected by a bug that has been fixed in version V0.1.2."
+										+ "\nYou may only reproduce this setting by running your file in CiliaQ Preparator version " + version + ", which can be downloaded at"
+										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + version.toLowerCase() + " and manually installed to your FIJI/ImageJ."
+										+ "\nRead more about the bug at the release notes of CiliaQ Preparator version V0.1.2:"
+										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2");
+								IJ.error("CiliaQ_Preparator cannot import this setting since it is from an older CiliaQ Preparator version (" + version + ") and running"
+										+ "\nCiliaQ_Preparator version " + version + " with this setting was affected by a bug that has been fixed in version V0.1.2."
+										+ "\nYou may only reproduce this setting by running your file in CiliaQ Preparator version " + version + ", which can be downloaded at"
+										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + version.toLowerCase() + " and manually installed to your FIJI/ImageJ."
+										+ "\nRead more about the bug at the release notes of CiliaQ Preparator version V0.1.2:"
+										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2");
+								return false;
+							}
+						}						
+					}
+				}
+			}
 		}					
 		br.close();
 		fr.close();
@@ -1129,7 +1278,7 @@ private boolean enterSettings() {
 		GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters");	
 		//show Dialog-----------------------------------------------------------------
 		//.setInsets(top, left, bottom)
-		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2021 JN Hansen", SuperHeadingFont);
+		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
 		gd.setInsets(5,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
 		gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
 		gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
@@ -1214,7 +1363,7 @@ private boolean enterSettings() {
 			GenericDialog gd2 = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
 			//show Dialog-----------------------------------------------------------------
 			//.setInsets(top, left, bottom)
-			gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2021 JN Hansen", SuperHeadingFont);
+			gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
 			gd2.setInsets(0,0,0);	gd2.addMessage("Select the preferences for channel to be segmented "+ (c+1) + " here.", InstructionsFont);
 			
 			gd2.setInsets(0,10,0);	gd2.addNumericField("Channel Nr (>= 1 & <= nr of channels)", c+1, 0);

@@ -13,7 +13,7 @@ public class Processing {
 	 * This code was retrieved from https://github.com/sRassmann/canny3d-thresholder, version v0.1.0; Code was adapted by 
 	 * @author Jan N. Hansen
 	 * to fit into the CiliaQ_Preparator.
-	 * Last modification: Sep 18, 2023.
+	 * Last modification: Sep 19, 2023.
 	 * 
 	 * Wraps the logic and real processing of the generated plugin.
 	 * 

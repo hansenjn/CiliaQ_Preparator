@@ -12,7 +12,7 @@ import ij.gui.GenericDialog;
  * and was adapted by 
  * @author Jan N. Hansen
  * to fit into the CiliaQ_Preparator.
- * Last modification: Sep 18, 2023. 
+ * Last modification: Sep 19, 2023. 
  */
 public class ProcessSettings {	
 	static String pluginName = "Canny 3D Thresholder"; 
@@ -46,7 +46,7 @@ public class ProcessSettings {
 	public static ProcessSettings initByGD(String Task) throws Exception {
 		ProcessSettings inst = new ProcessSettings(); // returned instance of ImageSetting class
 		GenericDialog gd = new GenericDialog(pluginName + " - Image Processing Settings");
-		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann), modified by J.N. Hansen (last mod.: Sep 18, 2023)",
+		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann), modified by J.N. Hansen (last mod.: Sep 19, 2023)",
 				new Font("Sansserif", Font.BOLD, 14));
 		gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
 		gd.setInsets(0,0,0);	gd.addMessage("Canny 3D Thresholder requires the installation of additional packages in your FIJI/ImageJ distribution.", new Font("Sansserif", 2, 12));
