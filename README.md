@@ -1,4 +1,4 @@
-# CiliaQ_Preparator
+# ![CiliaQ](https://github.com/hansenjn/CiliaQ/blob/master/Webfiles/20200618%20CiliaQ%20Logo%20Small.png?raw=true) Preparator
 An ImageJ plugin to prepare images for analysis with [CiliaQ](https://github.com/hansenjn/CiliaQ). For all information on how to install, use, and cite CiliaQ_Preparator, please visit the [CiliaQ repository](https://github.com/hansenjn/CiliaQ), which offers a user guide and a wiki for the whole CiliaQ analysis workflow.
 
 Copyright (C) 2019-2023: Jan N. Hansen (contact: jan.hansen (at) uni-bonn.de).
