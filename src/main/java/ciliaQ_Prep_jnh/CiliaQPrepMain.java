@@ -1,6 +1,6 @@
 package ciliaQ_Prep_jnh;
 /** ===============================================================================
-* CiliaQ_Preparator Version 0.1.2
+* CiliaQ_Preparator Version 0.2.0
 * 
 * This program is free software; you can redistribute it and/or
 * modify it under the terms of the GNU General Public License
@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: September 19, 2023)
+* Date: September 29, 2019 (This Version: August 16, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -38,6 +38,9 @@ import ij.measure.*;
 import ij.plugin.*;
 import ij.process.LUT;
 import ij.text.*;
+import ij.plugin.frame.Recorder;
+import java.awt.GraphicsEnvironment;
+
 import loci.plugins.BF;
 import loci.plugins.in.ImporterOptions;
 import ij.process.AutoThresholder.Method;
@@ -45,7 +48,7 @@ import ij.process.AutoThresholder.Method;
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	static final String PLUGINNAME = "CiliaQ Preparator";
-	static final String PLUGINVERSION = "0.1.2";
+	static final String PLUGINVERSION = "0.2.0";
 	
 	//Fix fonts
 	static final Font SuperHeadingFont = new Font("Sansserif", Font.BOLD, 16);
@@ -64,7 +67,8 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	static SimpleDateFormat FullDateFormatter2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 	
 	//Progress Dialog
-	ProgressDialog progress;	
+	ProgressReporter progress;	
+	boolean showGUIs = true;	// False under --headless or in a macro to suppress dialogs and switch to IJ.log.
 	boolean processingDone = false;	
 	boolean continueProcessing = true;
 	
@@ -82,14 +86,28 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	final static String[] stackMethod = {"apply threshold determined in the stack histogram",
 			"apply threshold determined in a maximum-intensity-projection",
 			"input image is no stack"};	
-	
 	String chosenStackMethods [] = new String [] {stackMethod[1],stackMethod[1],stackMethod[1]};
+	
+	/**
+	 * Gaussian blur applied BEFORE background subtraction/division.
+	 * Introduced in V0.2.0, because we practically identified this to be helpful in many cases.
+	 * Like every other preprocessing step this affects the segmentation only - the saved
+	 * intensities are the original ones.
+	 */
+	boolean preBlur [] = new boolean [] {false,false,false};
+	double preBlurRadius [] = new double [] {2.0, 2.0, 2.0};
+	
 	boolean subtractBackground [] = new boolean [] {false, false, false};
 	boolean divideBackground [] = new boolean [] {false, false, false};
 	boolean includeDuplicateChannel [] = new boolean [] {true,true,true};
 	double subtractBGRadius [] = new double [] {10.0, 10.0, 10.0};
 	double divideBGRadius [] = new double [] {3.0, 3.0, 3.0};
 	
+	/**
+	 * Gaussian blur applied AFTER background subtraction/division.
+	 * Like every other preprocessing step this affects the segmentation only - the saved
+	 * intensities are the original ones.
+	 */
 	boolean additionalBlur [] = new boolean [] {false,false,false};
 	double additionalBlurRadius [] = new double [] {0.5, 0.5, 0.5};
 	
@@ -130,105 +148,144 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 //		enum channelType {PLAQUE,CELL,NEURITE};
 	
 public void run(String arg) {
-	GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + "");	
-	//show Dialog-----------------------------------------------------------------
-	//.setInsets(top, left, bottom)
-	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
-	gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
-	gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats.", InstructionsFont);
-	gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
-	
-	gd.setInsets(10,0,0);	gd.addChoice("Preferences: ", settingsMethod, selectedSettingsVariant);
-	gd.setInsets(0,0,0);	gd.addMessage("Note: you may only load preferences from CiliaQ Preparator version v0.0.6 or higher.", InstructionsFont);
-	
-	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
-	gd.setInsets(5,0,0);	gd.addChoice("Output image name: ", outputVariant, chosenOutputName);
-	gd.setInsets(5,0,0);	gd.addChoice("output number format", nrFormats, nrFormats[0]);
-	gd.setInsets(5,0,0);	gd.addCheckbox("Keep computer awake during processing", keepAwake);
-	
-	gd.showDialog();
-	//show Dialog-----------------------------------------------------------------
-
-	//read and process variables--------------------------------------------------
-	selectedTaskVariant = gd.getNextChoice();
-	selectedSettingsVariant = gd.getNextChoice();
-	chosenOutputName = gd.getNextChoice();	
-	ChosenNumberFormat = gd.getNextChoice();
-	if(ChosenNumberFormat.equals(nrFormats[0])){ //US-Format
-		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-	}else if (ChosenNumberFormat.equals(nrFormats[1])){
-		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-	}
-	keepAwake = gd.getNextBoolean();
-	
-	//read and process variables--------------------------------------------------
-	if (gd.wasCanceled()) return;
-	
-	if(selectedSettingsVariant.equals(settingsMethod [0])){
-		if(!enterSettings()) {
+	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+	//-----------Eventually read settings from macro input------------------------
+	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+	boolean showDialogs = true;
+	boolean record = false;
+	if(IJ.macroRunning() && Macro.getOptions() != null && Macro.getOptions().length() > 0){
+		if(!readSettingsFromMacroString(Macro.getOptions())){
 			return;
 		}
-		/*
-		 *	Instantiate settings for Canny Thresholders 
-		 * */
-		cannySettings = new ProcessSettings [channelIDs.length];
-		for(int i = 0; i < channelIDs.length; i++){
-			if(chosenAlgorithms[i] == "CANNY 3D"){
-				try {
-					cannySettings [i] = ProcessSettings.initByGD("channel " + i + " with channel nr " + channelIDs [i]);
-				} catch (Exception e) {
-					return;
-				}
-			}		
+		if(!validateSettings()){
+			return;
 		}
-		/*
-		 *	Instantiate settings for Hysteresis Threshold
-		 * */
-		customLowThr = new double [channelIDs.length];
-		customHighThr = new double [channelIDs.length];
-		chosenLowAlg = new String [channelIDs.length];
-		chosenHighAlg = new String [channelIDs.length];
-		
-		Arrays.fill(chosenLowAlg,"Triangle");
-		Arrays.fill(chosenHighAlg,"Otsu");
-		
-		for(int i = 0; i < channelIDs.length; i++){
-			if(chosenAlgorithms[i] == "HYSTERESIS threshold") {
-				if(!requestHysteresisPrefs("channel " + i + " with channel nr " + channelIDs [i], i)) {
-					return;
-				}
-			}		
-		}
-	}else if(!importSettings()) {
-		IJ.error("Preferences could not be loaded due to file error...");
+		showDialogs = false;
+	}else if(GraphicsEnvironment.isHeadless()){
+		IJ.log(PLUGINNAME + ": running headless but no macro options were given - nothing to do."
+				+ " Pass settings=[/path/to/..._CQP.txt] or the c<n>- keys.");
 		return;
 	}
-	
-	/*
-	 * Test whether input error
-	 * */
-	boolean passSameChannelTest = true;
-	for(int c = 0; c < channelIDs.length; c++) {
-		for(int ci = 0; ci < channelIDs.length; ci++) {
-			if(c == ci) continue;
-			if(channelIDs [c] == channelIDs [ci]) {
-				passSameChannelTest = false;
-			}
-		}
-	}
-	if(!passSameChannelTest){
-		new WaitForUserDialog("CiliaQ does not allow to process one channel twice! Insert different channel IDs for different channels").show();
-		return;
-	}	
-	
-//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
-//---------------------end-GenericDialog-end----------------------------------
-//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 
+	if(showDialogs) {
+		// New in V0.2.0
+		if(Recorder.record){
+			// The recorder cannot capture these dialogs, so it is suspended here.
+			// Later we provide a custom call string.
+			record = true;
+			Recorder.record = false;
+		}
+		
+		GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + "");	
+		//show Dialog-----------------------------------------------------------------
+		//.setInsets(top, left, bottom)
+		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
+		gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
+		gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats.", InstructionsFont);
+		gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", InstructionsFont);
+		
+		gd.setInsets(10,0,0);	gd.addChoice("Preferences: ", settingsMethod, selectedSettingsVariant);
+		gd.setInsets(0,0,0);	gd.addMessage("Note: you may only load preferences from CiliaQ Preparator version v0.0.6 or higher.", InstructionsFont);
+		
+		gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
+		gd.setInsets(5,0,0);	gd.addChoice("Output image name: ", outputVariant, chosenOutputName);
+		gd.setInsets(5,0,0);	gd.addChoice("output number format", nrFormats, nrFormats[0]);
+		gd.setInsets(5,0,0);	gd.addCheckbox("Keep computer awake during processing", keepAwake);
+		
+		gd.showDialog();
+		//show Dialog-----------------------------------------------------------------
+	
+		//read and process variables--------------------------------------------------
+		selectedTaskVariant = gd.getNextChoice();
+		selectedSettingsVariant = gd.getNextChoice();
+		chosenOutputName = gd.getNextChoice();	
+		ChosenNumberFormat = gd.getNextChoice();
+		if(ChosenNumberFormat.equals(nrFormats[0])){ //US-Format
+			df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+			df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+			df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+		}else if (ChosenNumberFormat.equals(nrFormats[1])){
+			df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+			df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+			df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+		}
+		keepAwake = gd.getNextBoolean();
+		
+		//read and process variables--------------------------------------------------
+		if (gd.wasCanceled()) {
+			if(record) Recorder.record = true;	// restore recorder before aborting
+			return;
+		}
+				
+		if(selectedSettingsVariant.equals(settingsMethod [0])){
+			if(!enterSettings()) {
+				if(record) Recorder.record = true;	// restore recorder before aborting
+				return;
+			}
+			/*
+			 *	Instantiate settings for Canny Thresholders 
+			 * */
+			cannySettings = new ProcessSettings [channelIDs.length];
+			for(int i = 0; i < channelIDs.length; i++){
+				if(chosenAlgorithms[i] == "CANNY 3D"){
+					try {
+						cannySettings [i] = ProcessSettings.initByGD("channel " + i + " with channel nr " + channelIDs [i]);
+					} catch (Exception e) {
+						if(record) Recorder.record = true;	// restore recorder before aborting						
+						return;
+					}
+				}		
+			}
+			/*
+			 *	Instantiate settings for Hysteresis Threshold
+			 * */
+			customLowThr = new double [channelIDs.length];
+			customHighThr = new double [channelIDs.length];
+			chosenLowAlg = new String [channelIDs.length];
+			chosenHighAlg = new String [channelIDs.length];
+			
+			Arrays.fill(chosenLowAlg,"Triangle");
+			Arrays.fill(chosenHighAlg,"Otsu");
+			
+			for(int i = 0; i < channelIDs.length; i++){
+				if(chosenAlgorithms[i] == "HYSTERESIS threshold") {
+					if(!requestHysteresisPrefs("channel " + i + " with channel nr " + channelIDs [i], i)) {
+						if(record) Recorder.record = true;	// restore recorder before aborting
+						return;
+					}
+				}		
+			}
+		}else if(!importSettings()) {
+			IJ.error("Preferences could not be loaded due to file error...");
+			if(record) Recorder.record = true;	// restore recorder before aborting
+			return;
+		}
+		
+		//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+		//---------------------end-GenericDialog-end----------------------------------
+		//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+		
+		/*
+		 * Check for input error
+		 * */		
+		if(!validateSettings()){
+			if(record) Recorder.record = true;	// restore recorder before aborting
+			return;
+		}	
+	}	// end of if(showDialogs)
+
+	if(record){
+		Recorder.record = true;
+	    if(Recorder.getInstance() != null){
+	        Recorder.setCommand(null);   // cancel ImageJ's auto-recorded menu command
+	    }
+		Recorder.recordString("run(\"" + PLUGINNAME + " v" + PLUGINVERSION + "\", \"" + createRecordString() + "\");\n");
+	}
+	
+	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+	//------------------------------ LOAD FILES ----------------------------------
+	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&		
+	
 	String name [] = {"",""};
 	String dir [] = {"",""};
 	ImagePlus allImps [] = new ImagePlus [2];
@@ -421,24 +478,25 @@ public void run(String arg) {
 	}
 	
 	
-	//add progressDialog
-		progress = new ProgressDialog(name, tasks);
-		progress.setLocation(0,0);
-		progress.setVisible(true);
-		progress.addWindowListener(new java.awt.event.WindowAdapter() {
-	        public void windowClosing(WindowEvent winEvt) {
-	        	if(processingDone==false){
-	        		IJ.error("Script stopped...");
-	        	}
-	        	continueProcessing = false;	        	
-	        	return;
-	        }
-		});
-		
-//		if(selectedTaskVariant.equals(taskVariant[1])){
-//			progress.notifyMessage(filesList, ProgressDialog.LOG);	
-//		}
-	
+	//add progressDialog or ConsoleProgress to follow processing progress
+		if(showGUIs && !GraphicsEnvironment.isHeadless()){
+			ProgressDialog dialog = new ProgressDialog(name, tasks);
+			progress = dialog;
+			dialog.setLocation(0,0);
+			dialog.setVisible(true);
+			dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+		        public void windowClosing(WindowEvent winEvt) {
+		        	if(processingDone==false){
+		        		IJ.error("Script stopped...");
+		        	}
+		        	continueProcessing = false;	        	
+		        	return;
+		        }
+			});
+		}else{
+			progress = new ConsoleProgress(name, tasks);
+		}
+			
 	
    	ImagePlus imp; 	  	
    	boolean backgroundPref = Prefs.blackBackground;
@@ -452,7 +510,9 @@ public void run(String arg) {
 		}
    	}
 	
-	for(int task = 0; task < tasks; task++){
+	boolean recordPref = Recorder.record;
+	Recorder.record = false;
+	try{for(int task = 0; task < tasks; task++){
 		if(keepAwake) {
 			stayAwake();
 		}
@@ -495,15 +555,15 @@ public void run(String arg) {
 		   					}
 		   				}
 		   				ImagePlus [] imps = BF.openImagePlus(bfOptions);
-//		   				IJ.run("Bio-Formats", "open=[" +dir[task] + name[task]
-//		   						+ "] autoscale color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT");
+//			   				IJ.run("Bio-Formats", "open=[" +dir[task] + name[task]
+//			   						+ "] autoscale color_mode=Default rois_import=[ROI manager] view=Hyperstack stack_order=XYCZT");
 		   				imp = imps [0];	
 		   				imp.setDisplayMode(IJ.COMPOSITE);
 		   			}
 		   			imp.hide();
 					imp.deleteRoi();
-//		   			imp = IJ.openImage(""+dir[task]+name[task]+"");			   			
-//					imp.deleteRoi();
+//			   			imp = IJ.openImage(""+dir[task]+name[task]+"");			   			
+//						imp.deleteRoi();
 		   		}else if(selectedTaskVariant.equals(taskVariant[0])){
 		   			imp = WindowManager.getCurrentImage();
 		   			imp.deleteRoi();
@@ -522,18 +582,22 @@ public void run(String arg) {
 			}
 		   	
 		   	//Checking image
-		   	{
-		   		if(imp.getBitDepth() == 24) {
-		   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": file is an RGB - RGB images cannot be processed! Convert to multi-channel stack for processing!", ProgressDialog.ERROR);
-					break running;
-		   		}
-		   		
-		   		isVirtual = false;
-		   		if(imp.getStack().isVirtual()) {
-		   			isVirtual = true;
-		   			imp = imp.duplicate();
-		   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Image " + name [task] + " was a virtual stack image. Copied into work space for processing!", ProgressDialog.LOG);
-		   		}
+		   	if(imp.getBitDepth() == 24) {
+	   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": file is an RGB - RGB images cannot be processed! Convert to multi-channel stack for processing!", ProgressDialog.ERROR);
+				break running;
+	   		}
+	   		
+		   	//Checking image for being a virtual stack
+		   	isVirtual = false;
+	   		if(imp.getStack().isVirtual()) {
+	   			isVirtual = true;
+	   			imp = imp.duplicate();
+	   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Image " + name [task] + " was a virtual stack image. Copied into work space for processing!", ProgressDialog.LOG);
+	   		}
+	   		
+	   		//Checks that require the open image (Introduced in V0.2.0)
+		   	if(!validateAgainstImage(imp, task)){
+		   		break running;
 		   	}
 		   	
 		   	//Create Outputfilename
@@ -588,6 +652,11 @@ public void run(String arg) {
 		   			}
 		   			
 		   			tempImp = copyChannel(procImp, channelIDs[c], false, false);
+		   			if(preBlur [c]){
+		   				progress.updateBarText("Pre-segmentation blur for channel " + channelIDs [c] + " ...");
+		   				tempImp = blurGaussian(tempImp, preBlurRadius [c]);
+		   			}
+		   			
 		   			if(subtractBackground [c]){
 		   				progress.updateBarText("Subtract background for channel " + channelIDs [c] + " ...");		
 			   			if(tempImp.getStackSize()>1){
@@ -766,14 +835,12 @@ public void run(String arg) {
 		   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 			   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
 			   					try{
-			   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
+			   						String label = imp.getStack().getSliceLabel(indexOld+1);
+			   						if(label == null || label.isEmpty()){
 				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 				   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-				   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
-				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
-			   							+  " T" + (f+1) + "/" + procImp.getNFrames();
 				   					}else{
-				   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+				   						copyStr = label;
 				   					}
 			   					}catch(Exception e){
 			   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
@@ -794,14 +861,12 @@ public void run(String arg) {
 	   				   					indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 					   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
 					   					try{
-					   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
-						   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
-						   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-						   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+					   						String label = imp.getStack().getSliceLabel(indexOld+1);
+					   						if(label == null || label.isEmpty()){
 						   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 					   							+  " T" + (f+1) + "/" + procImp.getNFrames();
 						   					}else{
-						   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+						   						copyStr = label;
 						   					}
 					   					}catch(Exception e){
 					   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
@@ -819,14 +884,12 @@ public void run(String arg) {
 		   						indexOld = imp.getStackIndex(c+1, s+1, f+1)-1;
 			   					indexNew = tempImp.getStackIndex(c+cNew+1, s+1, f+1)-1;
 			   					try{
-			   						if(imp.getStack().getSliceLabel(indexOld+1).equals(null)){
-				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
-				   							+  " T" + (f+1) + "/" + procImp.getNFrames();
-				   					}else if(imp.getStack().getSliceLabel(indexOld+1).isEmpty()){
+			   						String label = imp.getStack().getSliceLabel(indexOld+1);
+			   						if(label == null || label.isEmpty()){
 				   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 			   							+  " T" + (f+1) + "/" + procImp.getNFrames();
 				   					}else{
-				   						copyStr = imp.getStack().getSliceLabel(indexOld+1);
+				   						copyStr = label;
 				   					}
 			   					}catch(Exception e){
 			   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
@@ -859,7 +922,7 @@ public void run(String arg) {
 		   	}
 		   	
 		   	addFooter(tp1, startDate);				
-			tp1.saveAs(filePrefix + ".txt");			
+			writeTextFile(filePrefix + ".txt", tp1.getText()); //tp1.saveAs(filePrefix + ".txt"); Switched to java-based writing to avoid macro notion
 
 			progress.updateBarText("Finished ...");
 		   
@@ -881,22 +944,46 @@ public void run(String arg) {
 		progress.updateBarText("finished!");
 		progress.setBar(1.0);
 		progress.moveTask(task);
-	}
-	Prefs.blackBackground = backgroundPref;
+	}}finally{
+		Recorder.record = recordPref;
+		Prefs.blackBackground = backgroundPref;		
+	}	
 }
 
 /**
  * Import settings from existing file
+ * Updated for V0.2.0 to handle headless loading
  */
 private boolean importSettings() {
-	java.awt.FileDialog fd = new java.awt.FileDialog((Frame) null, "Select CQP file to load preferences!");
-	fd.setDirectory(System.getProperty("user.dir", "."));
-	fd.setMultipleMode(false);
-	fd.setMode(FileDialog.LOAD);
-	fd.setVisible(true);
-	File settingsFile = fd.getFiles()[0];
+	File settingsFile = null;	
+	String macroOptions = IJ.macroRunning() ? Macro.getOptions() : null;
+	String macroPath = macroValue(macroOptions, "settings");	
+	if(macroPath != null){
+		settingsFile = new File(macroPath);
+		if(!settingsFile.exists() || !settingsFile.canRead()){
+			IJ.error(PLUGINNAME + ": cannot read the settings file '" + macroPath + "'.");
+			return false;
+		}
+		IJ.log(PLUGINNAME + ": loading preferences from " + macroPath);
+	}else{
+		if(GraphicsEnvironment.isHeadless()){
+			IJ.error(PLUGINNAME + ": cannot open a file dialog while headless."
+					+ " Pass settings=[/path/to/..._CQP.txt] in the macro options.");
+			return false;
+		}
+		java.awt.FileDialog fd = new java.awt.FileDialog((Frame) null, "Select CQP file to load preferences!");
+		fd.setDirectory(System.getProperty("user.dir", "."));
+		fd.setMultipleMode(false);
+		fd.setMode(FileDialog.LOAD);
+		fd.setVisible(true);
+		// getFiles() is empty when the user cancels - indexing it threw before.
+		if(fd.getFiles() == null || fd.getFiles().length == 0){
+			return false;
+		}
+		settingsFile = fd.getFiles()[0];
+	}
 	
-	if(settingsFile.equals(null)) {
+	if(settingsFile == null) {
 		return false;
 	}	
 
@@ -910,7 +997,7 @@ private boolean importSettings() {
 		reading: while(true){
 			try{
 				line = br.readLine();	
-				if(line.equals(null)){
+				if(line == null){
 					break reading;
 				}
 			}catch(Exception e){
@@ -931,7 +1018,7 @@ private boolean importSettings() {
 			
 			if(line.contains("Segmented channel")) {
 				nChannels ++;
-			}		
+			}
 		}					
 		br.close();
 		fr.close();
@@ -942,23 +1029,8 @@ private boolean importSettings() {
 	}
 	
 	
-	// initialize for nr of channels
-	channelIDs = new int [nChannels];
-	includeDuplicateChannel = new boolean [nChannels];
-	Arrays.fill(includeDuplicateChannel,false);
-	subtractBackground = new boolean [nChannels];
-	Arrays.fill(subtractBackground,false);
-	subtractBGRadius = new double [nChannels];
-	chosenAlgorithms = new String [nChannels];
-	customThr = new double [nChannels];
-	chosenStackMethods = new String [nChannels];
-	separateTimesteps = new boolean [nChannels];
-	Arrays.fill(separateTimesteps,false);
-	cannySettings = new ProcessSettings [nChannels];
-	customLowThr = new double [nChannels];
-	customHighThr = new double [nChannels];
-	chosenLowAlg = new String [nChannels];
-	chosenHighAlg = new String [nChannels];
+	// initialize for nr of channels (switch to new void method in V0.2.0)
+	initChannelArrays(nChannels);
 	
 	//read individual channel settings
 	boolean channelReading = false;
@@ -971,7 +1043,7 @@ private boolean importSettings() {
 		reading: while(true){
 			try{
 				line = br.readLine();	
-				if(!line.equals("") && line.equals(null)){
+				if(line == null){
 					break reading;
 				}
 			}catch(Exception e){
@@ -989,47 +1061,54 @@ private boolean importSettings() {
 				if(line.contains("Channel Nr:")){
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
-					channelIDs [actualC] = Integer.parseInt(tempString);	
+					channelIDs [actualC] = Integer.parseInt(tempString);
 					IJ.log("C" + actualC + ": channel nr = " + channelIDs [actualC]);
 				}
 				if(line.contains("Channel duplicated to include a copy of the channel that is not segmented.")){
 					includeDuplicateChannel [actualC] = true;
 					IJ.log("C" + actualC + ": duplicate C");
 				}
+				if(line.contains("Gaussian blur before background removal")){
+					preBlur [actualC] = true;
+					tempString = line.substring(line.lastIndexOf("	")+1);
+					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
+					preBlurRadius [actualC] = Double.parseDouble(tempString);
+					IJ.log("C" + actualC + ": pre-blur rad = " + preBlurRadius [actualC]);
+				}
 				if(line.contains("Subtract Background:")){
 					subtractBackground [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					subtractBGRadius [actualC] = Double.parseDouble(tempString);
-					IJ.log("C" + actualC + ": sbg rad = " + subtractBGRadius [actualC]);						
+					IJ.log("C" + actualC + ": sbg rad = " + subtractBGRadius [actualC]);
 				}
 				if(line.contains("Divide By Background:")){
 					divideBackground [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
-					divideBGRadius [actualC] = Double.parseDouble(tempString);	
-					IJ.log("C" + actualC + ": dbg rad = " + divideBGRadius [actualC]);						
+					divideBGRadius [actualC] = Double.parseDouble(tempString);
+					IJ.log("C" + actualC + ": dbg rad = " + divideBGRadius [actualC]);
 				}
 				if(line.contains("Additional blur with Gaussian")){
 					additionalBlur [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
-					additionalBlurRadius [actualC] = Double.parseDouble(tempString);	
-					IJ.log("C" + actualC + ": blur rad = " + additionalBlurRadius [actualC]);						
+					additionalBlurRadius [actualC] = Double.parseDouble(tempString);
+					IJ.log("C" + actualC + ": blur rad = " + additionalBlurRadius [actualC]);
 				}
 				if(line.contains("Every time step separately segmented.")) {
 					separateTimesteps [actualC]= true;
-					IJ.log("C" + actualC + ": time steps separately");	
+					IJ.log("C" + actualC + ": time steps separately");
 				}
 				
 				if(line.contains("Segmentation method:")){
 					if(line.contains("Canny 3D Thresholder")) {
 						chosenAlgorithms [actualC] = algorithm [17];
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
+						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
 						
 						cannySettings [actualC] = ProcessSettings.initDefault();
-						line = br.readLine();	
-						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
+						line = br.readLine();
+						if(line == null){IJ.error("Reading problem with Gauss Sigma."); break reading;}
 						if(!line.contains("Gauss sigma:")) {
 							IJ.error("Gauss not found in Canny settings - no preferences loading!");
 							return false;
@@ -1037,10 +1116,10 @@ private boolean importSettings() {
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						cannySettings [actualC].setGaussSigma(Double.parseDouble(tempString));
-						IJ.log("C" + actualC + ": Gauss " + cannySettings [actualC].getGaussSigma());	
+						IJ.log("C" + actualC + ": Gauss " + cannySettings [actualC].getGaussSigma());
 						
-						line = br.readLine();	
-						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
+						line = br.readLine();
+						if(line == null){IJ.error("Reading problem with Canny alpha."); break reading;}
 						if(!line.contains("Canny alpha:")) {
 							IJ.error("Alpha not found in Canny settings - no preferences loading!");
 							return false;
@@ -1050,20 +1129,25 @@ private boolean importSettings() {
 						cannySettings [actualC].setCannyAlpha(Double.parseDouble(tempString));
 						IJ.log("C" + actualC + ": Alpha " + cannySettings [actualC].getCannyAlpha());
 						
-						line = br.readLine();	
-						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
+						line = br.readLine();
+						if(line == null){IJ.error("Reading problem with low threshold method."); break reading;}
 						if(!line.contains("Low threshold method")) {
 							IJ.error("LowThr method not found in Canny settings - no preferences loading!");
 							return false;
 						}
+						
+						//Bug fixed in V0.2.0 (IsoData and IJ_IsoData could be confused with prior method)
+						String saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < ProcessSettings.thrAlgorithms.length; a++) {
-							if(line.contains(ProcessSettings.thrAlgorithms[a])) {
+							if(saved.equals(ProcessSettings.thrAlgorithms[a])) {
 								cannySettings [actualC].setLowThresholdAlgorithm(ProcessSettings.thrAlgorithms [a]);
 								break;
 							}
-						}	
+						}
+						
 						if(cannySettings [actualC].getLowThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
+							if(line == null){IJ.error("Reading problem with manually selected low threshold."); break reading;}
 							if(!line.contains("Manually selected low threshold:")){
 								IJ.error("Could not find manual lowThr in Canny settings - no preferences loaded!");
 								return false;
@@ -1074,19 +1158,25 @@ private boolean importSettings() {
 						}
 						IJ.log("C" + actualC + ": low Thr " + cannySettings [actualC].getLowThresholdAlgorithm());
 						
-						line = br.readLine();	
+						line = br.readLine();
+						if(line == null){IJ.error("Reading problem with high threshold method."); break reading;}
 						if(!line.contains("High threshold method")) {
 							IJ.error("HiThr method not found in Canny settings - no preferences loading!");
 							return false;
 						}
+
+						//Bug fixed in V0.2.0 (IsoData and IJ_IsoData could be confused with prior method)
+						saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < ProcessSettings.thrAlgorithms.length; a++) {
-							if(line.contains(ProcessSettings.thrAlgorithms[a])) {
+							if(saved.equals(ProcessSettings.thrAlgorithms[a])) {
 								cannySettings [actualC].setHighThresholdAlgorithm(ProcessSettings.thrAlgorithms [a]);
 								break;
 							}
 						}
+						
 						if(cannySettings [actualC].getHighThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
+							if(line == null){IJ.error("Reading problem with manually selected high threshold."); break reading;}
 							if(!line.contains("Manually selected high threshold:")){
 								IJ.error("Could not find manual highThr in Canny settings - no preferences loaded!");
 								return false;
@@ -1101,21 +1191,26 @@ private boolean importSettings() {
 						chosenAlgorithms [actualC] = algorithm [19];
 						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
 						
-						line = br.readLine();	
-						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
+						line = br.readLine();
+						if(line == null){IJ.error("Reading problem"); break reading;}
 						if(!line.contains("Low threshold method")) {
 							IJ.error("LowThr method not found in Hysteresis settings - no preferences loading!");
 							return false;
 						}
+						
+						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
+						String saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < hystAlgorithms.length; a++) {
-							if(line.contains(hystAlgorithms[a])) {
+							if(saved.equals(hystAlgorithms[a])) {
 								chosenLowAlg [actualC] = (hystAlgorithms [a]);
 								break;
 							}
-						}	
+						}
+						
 						IJ.log("C" + actualC + ": Low Thr method" + chosenLowAlg [actualC]);
 						if(chosenLowAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
+							if(line == null){IJ.error("Reading problem with manually selected low threshold."); break reading;}
 							if(!line.contains("Manually selected low threshold:")){
 								IJ.error("Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
 								return false;
@@ -1126,20 +1221,26 @@ private boolean importSettings() {
 							IJ.log("C" + actualC + ": Low Thr " + customLowThr [actualC]);
 						}
 						
-						line = br.readLine();	
+						line = br.readLine();
+						if(line == null){IJ.error("Reading problem with high threshold method."); break reading;}
 						if(!line.contains("High threshold method")) {
 							IJ.error("HiThr method not found in Hysteresis settings - no preferences loading!");
 							return false;
 						}
+						
+						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
+						saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < hystAlgorithms.length; a++) {
-							if(line.contains(hystAlgorithms[a])) {
+							if(saved.equals(hystAlgorithms[a])) {
 								chosenHighAlg [actualC] = (hystAlgorithms [a]);
 								break;
 							}
 						}
+						
 						IJ.log("C" + actualC + ": High Thr method" + chosenHighAlg [actualC]);
 						if(chosenHighAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
+							if(line == null){IJ.error("Reading problem with manually selected high threshold."); break reading;}
 							if(!line.contains("Manually selected high threshold:")){
 								IJ.error("Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
 								return false;
@@ -1154,7 +1255,7 @@ private boolean importSettings() {
 							
 						}else {
 							line = br.readLine();	
-							if(!line.equals("") && line.equals(null)){IJ.error("Reading problem with stack method"); break reading;}
+							if(line == null){IJ.error("Reading problem with stack method"); break reading;}
 							for(int sm = 0; sm < stackMethod.length; sm++) {
 								if(line.contains(stackMethod[sm])) {
 									chosenStackMethods [actualC] = stackMethod [sm];
@@ -1166,6 +1267,7 @@ private boolean importSettings() {
 					}else if(line.contains("CUSTOM threshold")) {
 						chosenAlgorithms [actualC] = algorithm [18];
 						line = br.readLine();
+						if(line == null){IJ.error("Reading problem with CUSTOM threshold value"); break reading;}
 						if(!line.contains("Custom threshold value:")){
 							IJ.error("Could not find custom threshold value in settings - no preferences loaded!");
 							return false;
@@ -1175,16 +1277,22 @@ private boolean importSettings() {
 						customThr [actualC] = Double.parseDouble(tempString);
 						IJ.log("C" + actualC + ": custom thr" + customThr [actualC]);
 					}else if(line.contains("applying intensity threshold based ")) {
-						for(int a = 0; a < algorithm.length; a++) {
-							if(line.contains(algorithm[a])) {
-								chosenAlgorithms [actualC] = algorithm [a];
-								break;
+						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
+						int s = line.indexOf("based on the ");
+						int e = line.indexOf(" threshold algorithm");
+						if(s >= 0 && e > s){
+							String savedAlg = line.substring(s + "based on the ".length(), e).trim();
+							for(int a = 0; a < algorithm.length; a++) {
+								if(savedAlg.equals(algorithm[a])) {
+									chosenAlgorithms [actualC] = algorithm [a];
+									break;
+								}
 							}
 						}
 						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
 						
 						line = br.readLine();	
-						if(!line.equals("") && line.equals(null)){IJ.error("Reading problem"); break reading;}
+						if(line == null){IJ.error("Reading problem with stack method."); break reading;}
 						for(int sm = 0; sm < stackMethod.length; sm++) {
 							if(line.contains(stackMethod[sm])) {
 								chosenStackMethods [actualC] = stackMethod [sm];
@@ -1193,13 +1301,20 @@ private boolean importSettings() {
 						}
 						IJ.log("C" + actualC + ": stack m " + chosenStackMethods [actualC]);	
 					}
-					if(!line.equals("") && line.equals(null)){ break reading;}
 				}
 			}
 			
 			if(line.contains("Plug-in version:")) {
 				String version = line.substring(line.lastIndexOf("V"));
 				IJ.log("Loaded settings stem from a CiliaQ Preparator run with Version " + version + ".");
+
+				// V0.2.0: note when settings come from a different version than this build.
+				if(!version.equals("V" + PLUGINVERSION)){
+					IJ.log(PLUGINNAME + ": settings were saved by version " + version
+						+ ", this plugin is V" + PLUGINVERSION
+						+ ". Settings that did not exist in the saved version keep their defaults.");
+				}
+				
 				/**
 				 * In Version V0.1.2, bugs in the generic dialog for Canny3D settings have been corrected.
 				 * For downwards compatibility, some settings need to be adjusted when reading in an analysis from older versions.
@@ -1283,15 +1398,197 @@ private boolean importSettings() {
 					}
 				}
 			}
+			//New from V0.2.0 check for version.
+			if(line.contains("ImageJ version:")){
+				String fileIJ = line.substring(line.lastIndexOf("\t")+1).trim();
+				String nowIJ  = IJ.getFullVersion();
+				if(!fileIJ.equals(nowIJ)){
+					IJ.log(PLUGINNAME + ": NOTE - the loaded settings file was produced with ImageJ "
+						+ fileIJ + ", but you are running ImageJ " + nowIJ + "."
+						+ " Auto-threshold results can differ slightly between ImageJ versions.");
+				}
+			}
 		}					
 		br.close();
 		fr.close();
-	}catch (IOException e) {
-		IJ.error("Problem with loading preferences");
+	}catch (Exception e) {
+		IJ.error("Problem with loading preferences (possibly a malformed or truncated settings file).");
 		e.printStackTrace();
 		return false;
 	}
 	return true;
+}
+
+/**
+ * @return the raw text after "<key>=" in the macro options, or null if the key is absent.
+ * Handles bracketed values ("key=[a b c]"), the "//[" / "//]" form the ImageJ recorder
+ * sometimes emits, and a key that sits at the very end of the option string.
+ * 
+ * Added for version v0.2.0 (August 2026)
+ */
+private String macroValue(String options, String key){
+	if(options == null) return null;
+	
+	// Locate the first occurrence of "key=".
+	int at = options.indexOf(key + "=");
+	
+	// Guard against a key that is a suffix of a longer key, e.g. "c1-blur=" inside
+	// "c11-blur=". A valid key must either start the string or be preceded by a space;
+	// if the match sits mid-token, keep searching for the next occurrence.
+	while(at > 0 && options.charAt(at - 1) != ' '){
+		at = options.indexOf(key + "=", at + 1);
+	}
+	
+	// Key not present (either never found, or only ever found mid-token).
+	if(at < 0) return null;
+	
+	// Everything after the '=' of this key. The value is the start of this substring.
+	String rest = options.substring(at + key.length() + 1);
+	
+	// Case 1: bracketed value "key=[a b c]" - used whenever the value can contain spaces.
+	// Return the text between the brackets. A missing closing ']' means a malformed
+	// option string, so return null rather than risk an out-of-range substring.	
+	if(rest.startsWith("[")){
+		int close = rest.indexOf("]");
+		return close < 0 ? null : rest.substring(1, close);
+	}
+	
+	// Case 2: the recorder sometimes wraps values as "key=//[a b c//]" instead of
+	// square brackets. Handle that form the same way, stripping the 3-char markers.
+	if(rest.startsWith("//[")){
+		int close = rest.indexOf("//]");
+		return close < 0 ? null : rest.substring(3, close);
+	}
+	
+	// Case 3: an unbracketed value ends at the next space. If there is no further space,
+	// the key is the last token in the string, so the value runs to the end.
+	int space = rest.indexOf(" ");
+	return space < 0 ? rest : rest.substring(0, space);
+}
+
+/**
+ * Read a numeric macro option and parse it as a double.
+ *
+ * Looks the key up via {@link #macroValue}. If the key is absent or its value is empty,
+ * the fallback is returned unchanged. German-style decimals ("0,5") are normalised to a
+ * dot before parsing, but only when there is no dot already, so a grouped value is not
+ * corrupted. If the text is present but not a valid number, a message is logged and the
+ * fallback is used rather than throwing.
+ *
+ * @param options  the full macro option string (may be null)
+ * @param key      the option name, without the trailing '='
+ * @param fallback the value to use if the key is missing, empty, or unparseable
+ * @return the parsed value, or fallback
+ */
+private double macroDouble(String options, String key, double fallback){
+	String text = macroValue(options, key);
+	if(text == null || text.length() == 0) return fallback;
+	if(text.contains(",") && !text.contains(".")) text = text.replace(",", ".");
+	try{ return Double.parseDouble(text); }
+	catch(NumberFormatException e){
+		IJ.log(PLUGINNAME + ": could not read '" + key + "=" + text + "', using " + fallback);
+		return fallback;
+	}
+}
+
+/**
+ * Read a numeric option and return it as an int.
+ *
+ * Delegates to {@link #macroDouble} and rounds the result to the nearest integer, so that
+ * a value recorded with a decimal part (e.g. "3.0") still reads back correctly. Shares all
+ * of macroDouble's tolerance: missing, empty or malformed values fall back silently.
+ *
+ * @param options  the full macro option string (may be null)
+ * @param key      the option name, without the trailing '='
+ * @param fallback the value to use if the key is missing, empty, or unparseable
+ * @return the rounded integer value, or fallback
+ */
+private int macroInt(String options, String key, int fallback){
+	return (int) Math.round(macroDouble(options, key, fallback));
+}
+
+/**
+ * Test for a bare, valueless flag such as "c1-duplicate" or "keep-awake".
+ *
+ * The option string is padded with a leading and trailing space and the flag is searched
+ * for being surrounded by spaces (" key "). This delimiting is essential: it prevents one flag
+ * name from matching inside another (e.g. "c1-blur" inside "c1-preblur") and prevents a
+ * flag from matching the prefix of a "key=value" option.
+ *
+ * @param options the full macro option string (may be null)
+ * @param key     the flag name to look for
+ * @return true if the flag is present as a standalone token, false otherwise
+ */
+private boolean macroFlag(String options, String key){
+	if(options == null) return false;
+	String padded = " " + options + " ";
+	return padded.contains(" " + key + " ");
+}
+
+/**
+ * Read an option whose value must be one of a fixed set of allowed strings.
+ *
+ * Resolution happens in three passes:
+ *   1. If the key is absent, the fallback is returned immediately.
+ *   2. An exact match against the allowed list is preferred.
+ *   3. Failing that, a unique substring match is accepted, so abbreviations still work
+ *      (e.g. "MIP" for the full stack-method label). If the substring matches more than
+ *      one allowed value it is treated as ambiguous and rejected.
+ * If nothing matches, a message is logged and the fallback is returned, so an unknown or
+ * ambiguous value degrades gracefully instead of failing the run.
+ *
+ * @param options  the full macro option string (may be null)
+ * @param key      the option name, without the trailing '='
+ * @param allowed  the permitted values (typically one of the plugin's choice arrays)
+ * @param fallback the value to use if the key is missing or unresolvable
+ * @return the matched allowed value, or fallback
+ */
+private String macroChoice(String options, String key, String [] allowed, String fallback){
+	String text = macroValue(options, key);
+	if(text == null) return fallback;
+	for(int i = 0; i < allowed.length; i++){
+		if(allowed[i].equals(text)) return allowed[i];
+	}
+	// Second pass: accept a unique substring, so abbreviations still work.
+	String hit = null;
+	for(int i = 0; i < allowed.length; i++){
+		if(allowed[i].contains(text)){
+			if(hit != null){ hit = null; break; }
+			hit = allowed[i];
+		}
+	}
+	if(hit != null) return hit;
+	IJ.log(PLUGINNAME + ": unknown value for '" + key + "': '" + text + "', using '" + fallback + "'");
+	return fallback;
+}
+
+/** Allocate every per-channel array. Called before any route fills them in. */
+private void initChannelArrays(int n){
+	channelIDs = new int [n];
+	includeDuplicateChannel = new boolean [n];	Arrays.fill(includeDuplicateChannel, false);
+	
+	// New params in V0.2.0
+	preBlur = new boolean [n];					Arrays.fill(preBlur, false);
+	preBlurRadius = new double [n];				Arrays.fill(preBlurRadius, 2.0);
+	
+	subtractBackground = new boolean [n];		Arrays.fill(subtractBackground, false);
+	subtractBGRadius = new double [n];			Arrays.fill(subtractBGRadius, 10.0);
+	
+	// Initialized from V0.2.0 on  - before remained uninit. TODO
+	divideBackground = new boolean [n];			Arrays.fill(divideBackground, false);
+	divideBGRadius = new double [n];			Arrays.fill(divideBGRadius, 3.0);
+	additionalBlur = new boolean [n];			Arrays.fill(additionalBlur, false);
+	additionalBlurRadius = new double [n];		Arrays.fill(additionalBlurRadius, 0.5);
+	
+	chosenAlgorithms = new String [n];			Arrays.fill(chosenAlgorithms, "RenyiEntropy");
+	customThr = new double [n];
+	chosenStackMethods = new String [n];		Arrays.fill(chosenStackMethods, stackMethod[1]);
+	separateTimesteps = new boolean [n];		Arrays.fill(separateTimesteps, false);
+	cannySettings = new ProcessSettings [n];
+	customLowThr = new double [n];
+	customHighThr = new double [n];
+	chosenLowAlg = new String [n];				Arrays.fill(chosenLowAlg, "Triangle");
+	chosenHighAlg = new String [n];				Arrays.fill(chosenHighAlg, "Otsu");
 }
 
 /**
@@ -1302,134 +1599,426 @@ private boolean enterSettings() {
 	//-------------------------GenericDialog--------------------------------------
 	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 		
-		GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters");	
+	GenericDialog gd = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters");	
+	//show Dialog-----------------------------------------------------------------
+	//.setInsets(top, left, bottom)
+	gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
+	gd.setInsets(5,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
+	gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
+	gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
+	gd.setInsets(0,10,0);	gd.addCheckbox("1. Smooth with Gaussian blur - radius", preBlur [0]);
+	gd.setInsets(-23,100,0);	gd.addNumericField("", preBlurRadius[0], 2);
+	gd.setInsets(0,10,0);	gd.addCheckbox("2. Subtract Background before segmentation - radius", subtractBackground [0]);
+	gd.setInsets(-23,100,0);	gd.addNumericField("", subtractBGRadius[0], 2);
+	gd.setInsets(0,10,0);	gd.addCheckbox("3. Divide by Background before segmentation - radius", divideBackground [0]);
+	gd.setInsets(-23,100,0);	gd.addNumericField("", divideBGRadius[0], 2);
+	gd.setInsets(0,10,0);	gd.addCheckbox("4. Smooth with Gaussian blur - radius", additionalBlur [0]);
+	gd.setInsets(-23,100,0);	gd.addNumericField("", additionalBlurRadius[0], 2);
+	gd.setInsets(0,10,0);	gd.addChoice("5. Segmentation method", algorithm, chosenAlgorithms[0]);
+	gd.setInsets(0,0,0);	gd.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
+			+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
+	gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
+	gd.setInsets(0,10,0);	gd.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
+	gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
+	
+	gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels:", 0, 0);
+	gd.setInsets(0,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment here and CiliaQ Prepartor will provide "
+			+ "more dialogs to select the corresponding segmentation settings)", InstructionsFont);
+	
+	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
+	gd.setInsets(5,0,0);	gd.addChoice("Segmentation style: ", intensityVariant, intensityVariant [0]);
+	
+	gd.showDialog();
+	//show Dialog-----------------------------------------------------------------
+
+	//read and process variables--------------------------------------------------	
+
+	{
+		int channelIDTemp = (int) gd.getNextNumber();
+		boolean includeDuplicateChannelTemp = gd.getNextBoolean();
+		boolean preBlurTemp = gd.getNextBoolean();
+		double preBlurRadiusTemp = (double) gd.getNextNumber();
+		boolean subtractBackgroundTemp = gd.getNextBoolean();
+		double subtractBGRadiusTemp = (double) gd.getNextNumber();
+		boolean divideBackgroundTemp = gd.getNextBoolean();
+		double divideBGRadiusTemp = (double) gd.getNextNumber();
+		boolean additionalBlurTemp = gd.getNextBoolean();
+		double additionalBlurRadiusTemp = (double) gd.getNextNumber();
+		String chosenAlgorithmsTemp = gd.getNextChoice();
+		double customThrTemp = gd.getNextNumber();
+		String chosenStackMethodsTemp = gd.getNextChoice();
+		boolean separateTimestepsTemp = gd.getNextBoolean();
+
+		nChannels = nChannels + (int) gd.getNextNumber();
+		
+		chosenImageStyle = gd.getNextChoice();
+		if(chosenImageStyle.equals(intensityVariant [0])){
+			keepIntensities = true;
+		}
+		
+		// Introduced for init in Version V0.2.0
+		initChannelArrays(nChannels);
+		
+		channelIDs [0] = channelIDTemp;
+		includeDuplicateChannel [0] = includeDuplicateChannelTemp;
+		preBlur [0] = preBlurTemp;
+		preBlurRadius [0] = preBlurRadiusTemp;
+		subtractBackground [0] = subtractBackgroundTemp;
+		subtractBGRadius [0] = subtractBGRadiusTemp;
+		divideBackground [0] = divideBackgroundTemp;
+		divideBGRadius [0] = divideBGRadiusTemp;
+		additionalBlur [0] = additionalBlurTemp;
+		additionalBlurRadius [0] = additionalBlurRadiusTemp;
+		chosenAlgorithms [0] = chosenAlgorithmsTemp;
+		customThr [0] = customThrTemp;
+		chosenStackMethods [0] = chosenStackMethodsTemp;
+		separateTimesteps [0] = separateTimestepsTemp;
+	}
+	System.gc();
+	
+	//read and process variables--------------------------------------------------
+	if (gd.wasCanceled()) return false;
+	
+	for(int c = 1; c < nChannels; c++) {
+		GenericDialog gd2 = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
 		//show Dialog-----------------------------------------------------------------
 		//.setInsets(top, left, bottom)
-		gd.setInsets(0,0,0);	gd.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
-		gd.setInsets(5,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HeadingFont);	
-		gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
-		gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
-		gd.setInsets(0,10,0);	gd.addCheckbox("Subtract Background before segmentation - radius", subtractBackground [0]);
-		gd.setInsets(-23,100,0);	gd.addNumericField("", subtractBGRadius[0], 2);
-		gd.setInsets(0,10,0);	gd.addCheckbox("Divide by Background before segmentation - radius", divideBackground [0]);
-		gd.setInsets(-23,100,0);	gd.addNumericField("", divideBGRadius[0], 2);
-		gd.setInsets(0,10,0);	gd.addCheckbox("Smooth with Gaussian blur - radius", additionalBlur [0]);
-		gd.setInsets(-23,100,0);	gd.addNumericField("", additionalBlurRadius[0], 2);
-		gd.setInsets(0,10,0);	gd.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
-		gd.setInsets(0,0,0);	gd.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
+		gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
+		gd2.setInsets(0,0,0);	gd2.addMessage("Select the preferences for channel to be segmented "+ (c+1) + " here.", InstructionsFont);
+		
+		gd2.setInsets(0,10,0);	gd2.addNumericField("Channel Nr (>= 1 & <= nr of channels)", c+1, 0);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("1. Smooth with Gaussian blur - radius", preBlur [0]);
+		gd2.setInsets(-23,100,0);	gd2.addNumericField("", preBlurRadius[0], 2);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("2. Subtract Background before segmentation - radius", subtractBackground [0]);
+		gd2.setInsets(-23,100,0);	gd2.addNumericField("", subtractBGRadius[0], 2);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("3. Divide by Background before segmentation - radius", divideBackground [0]);
+		gd2.setInsets(-23,100,0);	gd2.addNumericField("", divideBGRadius[0], 2);
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("4. Smooth with Gaussian blur - radius", additionalBlur [0]);
+		gd2.setInsets(-23,100,0);	gd2.addNumericField("", additionalBlurRadius[0], 2);
+		gd2.setInsets(0,10,0);	gd2.addChoice("5. Segmentation method", algorithm, chosenAlgorithms[0]);
+		gd2.setInsets(0,0,0);	gd2.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
 				+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
-		gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
-		gd.setInsets(0,10,0);	gd.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
-		gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
+		gd2.setInsets(0,0,0);	gd2.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
+		gd2.setInsets(0,10,0);	gd2.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
+		gd2.setInsets(0,10,0);	gd2.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
 		
-		gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels:", 0, 0);
-		gd.setInsets(0,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment here and CiliaQ Prepartor will provide "
-				+ "more dialogs to select the corresponding segmentation settings)", InstructionsFont);
-		
-		gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HeadingFont);	
-		gd.setInsets(5,0,0);	gd.addChoice("Segmentation style: ", intensityVariant, intensityVariant [0]);
-		
-		gd.showDialog();
-		//show Dialog-----------------------------------------------------------------
+		gd2.showDialog();
 
-		//read and process variables--------------------------------------------------	
-
-		{
-			int channelIDTemp = (int) gd.getNextNumber();
-			boolean includeDuplicateChannelTemp = gd.getNextBoolean();
-			boolean subtractBackgroundTemp = gd.getNextBoolean();
-			double subtractBGRadiusTemp = (double) gd.getNextNumber();
-			boolean divideBackgroundTemp = gd.getNextBoolean();
-			double divideBGRadiusTemp = (double) gd.getNextNumber();
-			boolean additionalBlurTemp = gd.getNextBoolean();
-			double additionalBlurRadiusTemp = (double) gd.getNextNumber();
-			String chosenAlgorithmsTemp = gd.getNextChoice();
-			double customThrTemp = gd.getNextNumber();
-			String chosenStackMethodsTemp = gd.getNextChoice();
-			boolean separateTimestepsTemp = gd.getNextBoolean();
-
-			nChannels = nChannels + (int) gd.getNextNumber();
-			
-			chosenImageStyle = gd.getNextChoice();
-			if(chosenImageStyle.equals(intensityVariant [0])){
-				keepIntensities = true;
-			}
-						
-			channelIDs = new int [nChannels];
-			includeDuplicateChannel = new boolean [nChannels];
-			subtractBackground = new boolean [nChannels];
-			subtractBGRadius = new double [nChannels];
-			divideBackground = new boolean [nChannels];
-			divideBGRadius = new double [nChannels];
-			additionalBlur = new boolean [nChannels];
-			additionalBlurRadius = new double [nChannels];
-			chosenAlgorithms = new String [nChannels];
-			customThr = new double [nChannels];
-			chosenStackMethods = new String [nChannels];
-			separateTimesteps = new boolean [nChannels];
-			
-			channelIDs [0] = channelIDTemp;
-			includeDuplicateChannel [0] = includeDuplicateChannelTemp;
-			subtractBackground [0] = subtractBackgroundTemp;
-			subtractBGRadius [0] = subtractBGRadiusTemp;
-			divideBackground [0] = divideBackgroundTemp;
-			divideBGRadius [0] = divideBGRadiusTemp;
-			additionalBlur [0] = additionalBlurTemp;
-			additionalBlurRadius [0] = additionalBlurRadiusTemp;
-			chosenAlgorithms [0] = chosenAlgorithmsTemp;
-			customThr [0] = customThrTemp;
-			chosenStackMethods [0] = chosenStackMethodsTemp;
-			separateTimesteps [0] = separateTimestepsTemp;
-		}
-		System.gc();
+		//read and process variables--------------------------------------------------
+		channelIDs [c] = (int) gd2.getNextNumber();
+		includeDuplicateChannel [c] = gd2.getNextBoolean();
+		preBlur [c] = gd2.getNextBoolean();
+		preBlurRadius [c] = (double) gd2.getNextNumber();
+		subtractBackground [c] = gd2.getNextBoolean();
+		subtractBGRadius [c] = (double) gd2.getNextNumber();
+		divideBackground [c] = gd2.getNextBoolean();
+		divideBGRadius [c] = (double) gd2.getNextNumber();
+		additionalBlur [c] = gd2.getNextBoolean();
+		additionalBlurRadius [c] = (double) gd2.getNextNumber();
+		chosenAlgorithms [c] = gd2.getNextChoice();
+		customThr [c] = gd2.getNextNumber();
+		chosenStackMethods [c] = gd2.getNextChoice();
+		separateTimesteps [c] = gd2.getNextBoolean();
 		
 		//read and process variables--------------------------------------------------
-		if (gd.wasCanceled()) return false;
-		
-		for(int c = 1; c < nChannels; c++) {
-			GenericDialog gd2 = new GenericDialog(PLUGINNAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
-			//show Dialog-----------------------------------------------------------------
-			//.setInsets(top, left, bottom)
-			gd2.setInsets(0,0,0);	gd2.addMessage(PLUGINNAME + ", Version " + PLUGINVERSION + ", \u00a9 2019-2023 JN Hansen", SuperHeadingFont);
-			gd2.setInsets(0,0,0);	gd2.addMessage("Select the preferences for channel to be segmented "+ (c+1) + " here.", InstructionsFont);
-			
-			gd2.setInsets(0,10,0);	gd2.addNumericField("Channel Nr (>= 1 & <= nr of channels)", c+1, 0);
-			gd2.setInsets(0,10,0);	gd2.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
-			gd2.setInsets(0,10,0);	gd2.addCheckbox("Subtract Background before segmentation - radius", subtractBackground [0]);
-			gd2.setInsets(-23,100,0);	gd2.addNumericField("", subtractBGRadius[0], 2);
-			gd2.setInsets(0,10,0);	gd2.addCheckbox("Divide by Background before segmentation - radius", divideBackground [0]);
-			gd2.setInsets(-23,100,0);	gd2.addNumericField("", divideBGRadius[0], 2);
-			gd2.setInsets(0,10,0);	gd2.addCheckbox("Smooth with Gaussian blur - radius", additionalBlur [0]);
-			gd2.setInsets(-23,100,0);	gd2.addNumericField("", additionalBlurRadius[0], 2);
-			gd2.setInsets(0,10,0);	gd2.addChoice("Segmentation method", algorithm, chosenAlgorithms[0]);
-			gd2.setInsets(0,0,0);	gd2.addMessage("If selecting the methods CANNY 3D or HYSTERESIS Threshold"
-					+ "another dialog for entering additional preferences will open after pressing OK.", InstructionsFont);
-			gd2.setInsets(0,0,0);	gd2.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
-			gd2.setInsets(0,10,0);	gd2.addChoice("Stack handling (obsolete for segmentation method 'CANNY 3D'): ", stackMethod, chosenStackMethods[0]);	
-			gd2.setInsets(0,10,0);	gd2.addCheckbox("Threshold every time step independently (obsolete for segmentation method 'CANNY 3D')", separateTimesteps [0]);		
-			
-			gd2.showDialog();
+		if (gd2.wasCanceled()) return false;
+	}	
+	System.gc();
+	return true;
+}
 
-			//read and process variables--------------------------------------------------
-			channelIDs [c] = (int) gd2.getNextNumber();
-			includeDuplicateChannel [c] = gd2.getNextBoolean();
-			subtractBackground [c] = gd2.getNextBoolean();
-			subtractBGRadius [c] = (double) gd2.getNextNumber();
-			divideBackground [c] = gd2.getNextBoolean();
-			divideBGRadius [c] = (double) gd2.getNextNumber();
-			additionalBlur [c] = gd2.getNextBoolean();
-			additionalBlurRadius [c] = (double) gd2.getNextNumber();
-			chosenAlgorithms [c] = gd2.getNextChoice();
-			customThr [c] = gd2.getNextNumber();
-			chosenStackMethods [c] = gd2.getNextChoice();
-			separateTimesteps [c] = gd2.getNextBoolean();
-			
-			//read and process variables--------------------------------------------------
-			if (gd2.wasCanceled()) return false;
-		}	
-		System.gc();
-		return true;
+/** Route a warning to a dialog when interactive, to the log otherwise. */
+private void warn(String message){
+	IJ.log(PLUGINNAME + " WARNING: " + message);
+	if(showGUIs && !GraphicsEnvironment.isHeadless()){
+		IJ.showMessage(PLUGINNAME + " - warning", message);
 	}
+}
+
+/**
+ * Check the settings once, whatever route they arrived by. Returns false only for
+ * problems that would make the run meaningless; everything else warns and continues.
+ */
+private boolean validateSettings(){
+	if(channelIDs == null || channelIDs.length == 0){
+		IJ.error(PLUGINNAME + ": no channel was configured.");
+		return false;
+	}
+
+	for(int c = 0; c < channelIDs.length; c++){
+		if(channelIDs [c] < 1){
+			IJ.error(PLUGINNAME + ": channel number " + channelIDs [c] + " is not valid (must be >= 1).");
+			return false;
+		}
+		// The same channel twice means the second pass segments an already-segmented
+		// channel, which silently produces nonsense.
+		for(int d = 0; d < c; d++){
+			if(channelIDs [c] == channelIDs [d]){
+				IJ.error(PLUGINNAME + ": channel " + channelIDs [c] + " is configured twice."
+						+ " The second run would segment the output of the first."
+						+ " Insert different channel IDs for different channels.");
+				return false;
+			}
+		}
+
+		// Radii and sigmas.
+		if(preBlur [c] && preBlurRadius [c] <= 0){
+			IJ.error(PLUGINNAME + ": the pre-segmentation blur radius must be > 0.");
+			return false;
+		}
+		if(subtractBackground [c] && subtractBGRadius [c] <= 0){
+			IJ.error(PLUGINNAME + ": the rolling-ball radius must be > 0.");
+			return false;
+		}
+		if(divideBackground [c] && divideBGRadius [c] <= 0){
+			IJ.error(PLUGINNAME + ": the divide-by-background radius must be > 0.");
+			return false;
+		}
+		if(additionalBlur [c] && additionalBlurRadius [c] <= 0){
+			IJ.error(PLUGINNAME + ": the Gaussian blur radius must be > 0.");
+			return false;
+		}
+
+		// Divide-by-background computes value / blurredValue in 32-bit. Where the
+		// blurred background is ~0 the result is Inf or NaN, which then never passes a
+		// finite threshold - the cilia silently vanish.
+		if(divideBackground [c]){
+			warn("Channel " + channelIDs [c] + ": 'Divide by Background' divides by a blurred"
+				+ "\ncopy of the image. If the background of this channel is (close to) zero -"
+				+ "\nfor example in a channel that was already background-subtracted - the"
+				+ "\nresult is infinite or undefined and nothing will be detected."
+				+ "\nPrefer 'Subtract Background' for such images.");
+		}
+
+		// Two blurs in a row is legal but rarely intended.
+		if(preBlur [c] && additionalBlur [c]){
+			warn("Channel " + channelIDs [c] + ": both the pre-background blur (" + df3.format(preBlurRadius [c])
+				+ ")\nand the post-background blur (" + df3.format(additionalBlurRadius [c])
+				+ ")\nare enabled. The image is smoothed twice; the effective smoothing is"
+				+ "\nlarger than either value. This is only useful if you deliberately want to"
+				+ "\nsmooth before AND after background removal.");
+		}
+
+		// A blur wider than the structures removes them.
+		if(preBlur [c] && subtractBackground [c] && preBlurRadius [c] >= subtractBGRadius [c]){
+			warn("Channel " + channelIDs [c] + ": the pre-blur radius (" + df3.format(preBlurRadius [c])
+				+ ") is not smaller than the rolling-ball radius (" + df3.format(subtractBGRadius [c])
+				+ "). Smoothing at the scale of the background estimate largely cancels the"
+				+ " background subtraction. A pre-blur of about a quarter of the rolling-ball"
+				+ " radius is a reasonable starting point.");
+		}
+
+		// CUSTOM threshold with the default value is almost always an oversight.
+		if(chosenAlgorithms [c].equals("CUSTOM threshold") && customThr [c] == 0.0){
+			warn("Channel " + channelIDs [c] + ": segmentation method is 'CUSTOM threshold'"
+				+ "\nbut the threshold is 0, so every voxel above zero will be kept."
+				+ "\nDid you mean to enter a threshold value?");
+		}
+
+		// Hysteresis with the low threshold stricter than the high one cannot grow.
+		if(chosenAlgorithms [c].equals("HYSTERESIS threshold")
+				&& chosenLowAlg [c].equals(chosenHighAlg [c])
+				&& !chosenLowAlg [c].equals(hystAlgorithms[0])){
+			warn("Channel " + channelIDs [c] + ": hysteresis thresholding was selected but the"
+				+ "\nlow and high thresholds use the same method (" + chosenLowAlg [c] + "),"
+				+ "\nso it behaves like a plain threshold. Pick a more inclusive method for the"
+				+ "\nlow threshold, for example Triangle low and Otsu high.");
+		}
+
+		// The 3D suite is needed for two methods. Check now, not after an hour of batch.
+		if(chosenAlgorithms [c].equals("CANNY 3D") || chosenAlgorithms [c].equals("HYSTERESIS threshold")){
+			try{
+				Class.forName("mcib3d.image3d.ImageInt");
+			}catch(ClassNotFoundException e){
+				IJ.error(PLUGINNAME + ": '" + chosenAlgorithms [c] + "' requires the 3D ImageJ Suite,"
+					+ "\nwhich is not installed. See"
+					+ "\nhttps://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ");
+				return false;
+			}
+		}
+	}
+
+	if(chosenImageStyle.equals(intensityVariant[1])){
+		warn("Segmentation style is set to produce a BINARY image. CiliaQ can still reconstruct"
+			+ "\ncilia from it and this option can be helpful if you have 0 background pixel values."
+			+ "\nHowever, note that intensity values derived from the mask / reconstruction channel"
+			+ "\nwill be meaningless. Intensity measures on all other channels will be fine."
+			+ "\nUse 'Keep intensities above threshold' unless you specifically"
+			+ " need a binary mask.");
+	}
+	return true;
+}
+
+/** Checks that need the image. Returns false to skip this image, not to abort the batch. */
+private boolean validateAgainstImage(ImagePlus imp, int task){
+	boolean ok = true;
+	for(int c = 0; c < channelIDs.length; c++){
+		if(channelIDs [c] > imp.getNChannels()){
+			progress.notifyMessage("Task " + (task+1) + ": settings ask for channel "
+				+ channelIDs [c] + " but the image has only " + imp.getNChannels()
+				+ " channel(s). Skipping this image.", ProgressDialog.ERROR);
+			ok = false;
+		}
+	}
+	// Stack handling mismatches are a very common and completely silent user error.
+	for(int c = 0; c < channelIDs.length; c++){
+		if(chosenAlgorithms [c].equals("CANNY 3D")) continue;
+		if(imp.getNSlices() > 1 && chosenStackMethods [c].equals(stackMethod[2])){
+			progress.notifyMessage("Task " + (task+1) + ": stack handling is set to '"
+				+ stackMethod[2] + "' but the image has " + imp.getNSlices()
+				+ " slices. The threshold will be taken from the first slice only.",
+				ProgressDialog.NOTIFICATION);
+		}else if(imp.getNSlices() == 1 && !chosenStackMethods [c].equals(stackMethod[2])){
+			progress.notifyMessage("Task " + (task+1) + ": the image is a single slice, so"
+				+ " stack handling '" + chosenStackMethods [c] + "' has no effect.",
+				ProgressDialog.NOTIFICATION);
+		}
+		if(separateTimesteps [c] && imp.getNFrames() == 1){
+			progress.notifyMessage("Task " + (task+1) + ": 'threshold every time step"
+				+ " independently' is on but the image has a single frame.",
+				ProgressDialog.NOTIFICATION);
+		}
+	}
+	if(imp.getBitDepth() == 8){
+		for(int c = 0; c < channelIDs.length; c++){
+			if(divideBackground [c]){
+				progress.notifyMessage("Task " + (task+1) + ": the image is 8-bit and"
+					+ " divide-by-background produces 32-bit ratios; the dynamic range"
+					+ " available for thresholding is very small.", ProgressDialog.NOTIFICATION);
+			}
+		}
+	}
+	return ok;
+}
+
+/**
+ * Set all settings from a macro option string. Missing keys keep their defaults.
+ * Mirrors CiliaQMain.readSettingsFromMacroString.
+ * @return false if the settings could not be established.
+ */
+private boolean readSettingsFromMacroString(String options){
+	IJ.log(PLUGINNAME + " " + PLUGINVERSION + ": reading settings from macro options.");
+	IJ.log("  options: " + options);
+
+	// In macro mode we always work on the front-most image; the multi-task manager and
+	// the file dialogs are GUI-only.
+	selectedTaskVariant = taskVariant[0];
+	showGUIs = false;
+	keepAwake = macroFlag(options, "keep-awake");
+
+	chosenOutputName = macroChoice(options, "output", outputVariant, outputVariant[0]);
+	ChosenNumberFormat = macroChoice(options, "number-format", nrFormats, nrFormats[0]);
+	if(ChosenNumberFormat.equals(nrFormats[0])){
+		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+	}else{
+		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+	}
+
+	// Route A: a metadata file supplies every per-channel setting (Stage 3).
+	if(macroValue(options, "settings") != null){
+		selectedSettingsVariant = settingsMethod[1];
+		return importSettings();
+	}
+
+	// Route B: per-channel settings come from the option string itself.
+	selectedSettingsVariant = settingsMethod[0];
+	chosenImageStyle = macroChoice(options, "segmentation-style", intensityVariant, intensityVariant[0]);
+	keepIntensities = chosenImageStyle.equals(intensityVariant[0]);
+
+	nChannels = macroInt(options, "channels", 1);
+	if(nChannels < 1){
+		IJ.error(PLUGINNAME + ": channels=" + nChannels + " is not valid.");
+		return false;
+	}
+	initChannelArrays(nChannels);
+
+	for(int c = 0; c < nChannels; c++){
+		String p = "c" + (c+1) + "-";
+		channelIDs [c] = macroInt(options, p + "nr", c+1);
+		includeDuplicateChannel [c] = macroFlag(options, p + "duplicate");
+
+		preBlur [c] = macroValue(options, p + "preblur") != null;
+		if(preBlur [c]) preBlurRadius [c] = macroDouble(options, p + "preblur", 2.0);
+
+		subtractBackground [c] = macroValue(options, p + "subtract-bg") != null;
+		if(subtractBackground [c]) subtractBGRadius [c] = macroDouble(options, p + "subtract-bg", 10.0);
+
+		divideBackground [c] = macroValue(options, p + "divide-bg") != null;
+		if(divideBackground [c]) divideBGRadius [c] = macroDouble(options, p + "divide-bg", 3.0);
+
+		additionalBlur [c] = macroValue(options, p + "blur") != null;
+		if(additionalBlur [c]) additionalBlurRadius [c] = macroDouble(options, p + "blur", 0.5);
+
+		chosenAlgorithms [c] = macroChoice(options, p + "method", algorithm, "RenyiEntropy");
+		customThr [c] = macroDouble(options, p + "custom-thr", 0.0);
+		chosenStackMethods [c] = macroChoice(options, p + "stack", stackMethod, stackMethod[1]);
+		separateTimesteps [c] = macroFlag(options, p + "separate-timesteps");
+
+		if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
+			chosenLowAlg [c] = macroChoice(options, p + "hyst-low", hystAlgorithms, "Triangle");
+			chosenHighAlg [c] = macroChoice(options, p + "hyst-high", hystAlgorithms, "Otsu");
+			customLowThr [c] = macroDouble(options, p + "hyst-low-thr", 0.0);
+			customHighThr [c] = macroDouble(options, p + "hyst-high-thr", 0.0);
+		}else if(chosenAlgorithms [c].equals("CANNY 3D")){
+			cannySettings [c] = ProcessSettings.initDefault();
+			cannySettings [c].setGaussSigma(macroDouble(options, p + "canny-sigma", 1.0));
+			cannySettings [c].setCannyAlpha(macroDouble(options, p + "canny-alpha", 5.0));
+			cannySettings [c].setLowThresholdAlgorithm(macroChoice(options, p + "canny-low",
+					ProcessSettings.thrAlgorithms, "Triangle"));
+			cannySettings [c].setHighThresholdAlgorithm(macroChoice(options, p + "canny-high",
+					ProcessSettings.thrAlgorithms, "Otsu"));
+			cannySettings [c].setLowThr(macroDouble(options, p + "canny-low-thr", 0.0));
+			cannySettings [c].setHighThr(macroDouble(options, p + "canny-high-thr", 0.0));
+		}
+	}
+	return true;
+}
+
+/**
+ * @return an option string that reproduces the current settings when passed back to this
+ * plugin. Mirrors CiliaQMain.createRecordString.
+ */
+private String createRecordString(){
+	String s = "";
+	s += "process=[" + taskVariant[0] + "] ";
+	s += "output=[" + chosenOutputName + "] ";
+	s += "number-format=[" + ChosenNumberFormat + "] ";
+	s += "segmentation-style=[" + chosenImageStyle + "] ";
+	s += "channels=" + channelIDs.length + " ";
+	for(int c = 0; c < channelIDs.length; c++){
+		String p = "c" + (c+1) + "-";
+		s += p + "nr=" + df0.format(channelIDs [c]) + " ";
+		if(includeDuplicateChannel [c])	s += p + "duplicate ";
+		if(preBlur [c])					s += p + "preblur=" + df3.format(preBlurRadius [c]) + " ";
+		if(subtractBackground [c])		s += p + "subtract-bg=" + df3.format(subtractBGRadius [c]) + " ";
+		if(divideBackground [c])		s += p + "divide-bg=" + df3.format(divideBGRadius [c]) + " ";
+		if(additionalBlur [c])			s += p + "blur=" + df3.format(additionalBlurRadius [c]) + " ";
+		s += p + "method=[" + chosenAlgorithms [c] + "] ";
+		if(chosenAlgorithms [c].equals("CUSTOM threshold")){
+			s += p + "custom-thr=" + df6.format(customThr [c]) + " ";
+		}else if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
+			s += p + "hyst-low=[" + chosenLowAlg [c] + "] ";
+			s += p + "hyst-high=[" + chosenHighAlg [c] + "] ";
+			if(chosenLowAlg [c].equals(hystAlgorithms[0]))	s += p + "hyst-low-thr=" + df6.format(customLowThr [c]) + " ";
+			if(chosenHighAlg [c].equals(hystAlgorithms[0]))	s += p + "hyst-high-thr=" + df6.format(customHighThr [c]) + " ";
+		}else if(chosenAlgorithms [c].equals("CANNY 3D")){
+			s += p + "canny-sigma=" + cannySettings [c].getGaussSigma() + " ";
+			s += p + "canny-alpha=" + cannySettings [c].getCannyAlpha() + " ";
+			s += p + "canny-low=[" + cannySettings [c].getLowThresholdAlgorithm() + "] ";
+			s += p + "canny-high=[" + cannySettings [c].getHighThresholdAlgorithm() + "] ";
+		}
+		if(!chosenAlgorithms [c].equals("CANNY 3D")){
+			s += p + "stack=[" + chosenStackMethods [c] + "] ";
+			if(separateTimesteps [c])	s += p + "separate-timesteps ";
+		}
+	}
+	return s;	// NOTE: trailing space kept on purpose, see below
+}
 
 ImagePlus divideByBackground(ImagePlus imp, double radius) {
 	ImagePlus outImp = IJ.createHyperStack("divided image", imp.getWidth(), imp.getHeight(), 1, imp.getNSlices(), imp.getNFrames(), 32);
@@ -1506,7 +2095,8 @@ private void addFooter(TextPanel tp, Date currentDate){
 	tp.append("The plug-in '"+PLUGINNAME+"' is distributed in the hope that it will be useful,"
 			+ " but WITHOUT ANY WARRANTY; without even the implied warranty of"
 			+ " MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.");
-	tp.append("Plug-in version:	V"+PLUGINVERSION);	
+	tp.append("Plug-in version:	V"+PLUGINVERSION);
+	tp.append("ImageJ version:	" + IJ.getFullVersion());   // NEW in V0.2.0
 }
 
 private String getOneRowFooter(Date currentDate){
@@ -1543,7 +2133,7 @@ private ImagePlus copyChannel(ImagePlus imp, int channel, boolean adjustDisplayR
 }
 
 private double [] getThresholds (ImagePlus imp, String chosenMethod, String chosenAlg, 
-		boolean seperateTimeSteps, ProgressDialog progress){
+		boolean seperateTimeSteps, ProgressReporter progress){
 	int startGroup = 1, endGroup = imp.getNFrames();
 	ImagePlus selectedImp;
 	double thresholds [] = {Double.NaN};
@@ -1587,7 +2177,7 @@ private double [] getThresholds (ImagePlus imp, String chosenMethod, String chos
 /**	
  *	Segment image using CANNY 3D method 
  * */
-private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, ProcessSettings settings, ImagePlus writeImp, int channelWriteImp){
+private void segmentUsingCanny3D(ImagePlus channelImp, ProgressReporter progress, ProcessSettings settings, ImagePlus writeImp, int channelWriteImp){
 	ImagePlus selectedImp;
 	int indexSelected, indexWriteImp;
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
@@ -1642,7 +2232,7 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressDialog progress, 
 /**	
  *	Segment image using Hysteresis threshold 
  * */
-private void segmentUsingHysteresis(ImagePlus channelImp, ProgressDialog progress, double thresholds [][], ImagePlus writeImp, int channelWriteImp){
+private void segmentUsingHysteresis(ImagePlus channelImp, ProgressReporter progress, double thresholds [][], ImagePlus writeImp, int channelWriteImp){
 	ImagePlus selectedImp;
 	int indexSelected, indexWriteImp;
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
@@ -1689,22 +2279,38 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressDialog progres
 }
 
 /**
- * Perform a hysteresis threshold on a single image
+ * Perform a hysteresis threshold on a single image.
+ * From V0.2.0: runs the 3D-Suite command in batch mode so no window is displayed.
  * */
-private ImagePlus doHysteresisThreshold(ImagePlus imp, ProgressDialog pD, double thresholds []) {
+private ImagePlus doHysteresisThreshold(ImagePlus imp, ProgressReporter pD, double thresholds []) {
 	pD.updateBarText("Hysteresis threshold - segmentation running");
-	imp.show();
-	IJ.run(imp, "3D Hysteresis Thresholding", "high=" + thresholds [1] + " low=" + thresholds [0]);
-	ImagePlus bin = WindowManager.getCurrentImage();
-	bin.hide();
-	imp.hide();
-	return bin;
+
+	boolean previousBatch = ij.macro.Interpreter.isBatchMode();
+	ij.macro.Interpreter.batchMode = true;
+	ImagePlus bin = null;
+	try{
+		imp.show();
+		IJ.run(imp, "3D Hysteresis Thresholding", "high=" + thresholds [1] + " low=" + thresholds [0]);
+		bin = ij.macro.Interpreter.getLastBatchModeImage();
+		if(bin == null || bin == imp){
+			throw new RuntimeException("3D Hysteresis Thresholding returned no image"
+					+ " - is the 3D ImageJ Suite installed?");
+		}
+		imp.hide();
+		ij.macro.Interpreter.removeBatchModeImage(bin);
+		return bin;
+	}catch(RuntimeException e){
+		if(bin != null){ bin.changes = false; bin.close(); }
+		throw e;
+	}finally{
+		ij.macro.Interpreter.batchMode = previousBatch;
+	}
 }
 
 /*
  * 
  * */
-private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, boolean seperateTimeSteps, ProgressDialog progress){
+private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, boolean seperateTimeSteps, ProgressReporter progress){
 	int startGroup = 1, endGroup = imp.getNFrames();
 	ImagePlus selectedImp;
 //	double thresholds [][] = new double [1][2]; // first dim: image, 2nd dim: 0 = low, 1 = high
@@ -1914,7 +2520,10 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 		tp.append("		Channel Nr:	" + df0.format(channelIDs [i]));
 		if(includeDuplicateChannel [i]){
 			tp.append("		Channel duplicated to include a copy of the channel that is not segmented.");
-		}else{tp.append("");}		
+		}else{tp.append("");}
+		if(preBlur [i]){
+			tp.append("		Gaussian blur before background removal:	" + df3.format(preBlurRadius[i]));
+		}else{tp.append("");}
 		if(subtractBackground [i]){
 			tp.append("		Subtract Background:	" + df3.format(subtractBGRadius[i]));
 		}else{tp.append("");}
@@ -1965,6 +2574,21 @@ private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, 
 		}	
 	}
 	tp.append("");
+}
+
+/** Write text straight to disk, bypassing ImageJ I/O (and the macro recorder). 
+ * Added in version V0.2.0. */
+private void writeTextFile(String path, String text){
+	try{
+		java.io.FileWriter fw = new java.io.FileWriter(path);
+		java.io.BufferedWriter bw = new java.io.BufferedWriter(fw);
+		if(text != null) bw.write(text);
+		bw.close();
+		fw.close();
+	}catch(java.io.IOException e){
+		progress.notifyMessage("Could not write metadata file '" + path + "': " + e.getMessage(),
+			ProgressDialog.ERROR);
+	}
 }
 
 private void stayAwake() {

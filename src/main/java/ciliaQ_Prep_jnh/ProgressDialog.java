@@ -2,6 +2,9 @@ package ciliaQ_Prep_jnh;
 /**
  * Parts of this code were inherited from MotiQ (https://github.com/hansenjn/MotiQ).
  * @author Jan Niklas Hansen
+ *
+ * In August 2026 for version v0.2.0, changed this to implement ProgressReporter
+ * to implement headless- and console-based running of CiliaQ Preparator.
  */
 
 import java.awt.BorderLayout;
@@ -19,7 +22,7 @@ import javax.swing.JScrollPane;
 import javax.swing.ListModel;
 import javax.swing.SwingConstants;
 
-public class ProgressDialog extends javax.swing.JFrame implements ActionListener{
+public class ProgressDialog extends javax.swing.JFrame implements ActionListener, ProgressReporter{
 	String dataLeft [], dataRight[], notifications [];
 	public boolean notificationsAvailable = false, errorsAvailable = false;
 	int task, tasks;
