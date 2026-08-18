@@ -960,11 +960,12 @@ private boolean importSettings() {
 	String macroPath = macroValue(macroOptions, "settings");	
 	if(macroPath != null){
 		settingsFile = new File(macroPath);
+		settingsFile = redirectTifToTxt(settingsFile); // Corrects common mistake: user points at the _CQP.tif output instead of the _CQP.txt metadata.
 		if(!settingsFile.exists() || !settingsFile.canRead()){
-			IJ.error(PLUGINNAME + ": cannot read the settings file '" + macroPath + "'.");
+			IJ.error(PLUGINNAME + ": cannot read the settings file '" + settingsFile + "'.");
 			return false;
 		}
-		IJ.log(PLUGINNAME + ": loading preferences from " + macroPath);
+		IJ.log(PLUGINNAME + ": loading preferences from " + settingsFile);
 	}else{
 		if(GraphicsEnvironment.isHeadless()){
 			IJ.error(PLUGINNAME + ": cannot open a file dialog while headless."
@@ -981,11 +982,13 @@ private boolean importSettings() {
 			return false;
 		}
 		settingsFile = fd.getFiles()[0];
+		settingsFile = redirectTifToTxt(settingsFile); // Corrects common mistake: user points at the _CQP.tif output instead of the _CQP.txt metadata.
+		if(!settingsFile.exists() || !settingsFile.canRead()){
+			IJ.error(PLUGINNAME + ": cannot read the settings file '" + settingsFile + "'.");
+			return false;
+		}
+		IJ.log(PLUGINNAME + ": loading preferences from " + settingsFile);
 	}
-	
-	if(settingsFile == null) {
-		return false;
-	}	
 
 	//read general settings
 	IJ.log("READING PREFERENCES:");
@@ -1417,6 +1420,28 @@ private boolean importSettings() {
 		return false;
 	}
 	return true;
+}
+
+/**
+ * New in V0.2.0:
+ * If a user selected a CiliaQ Preparator output image ("..._CQP.tif") instead of the
+ * matching metadata file ("..._CQP.txt"), redirect to the .txt if it exists next to it.
+ * Otherwise returns the original file unchanged. Added in V0.2.0.
+ */
+private File redirectTifToTxt(File chosen){
+	if(chosen == null) return chosen;
+	String path = chosen.getPath();
+	String lower = path.toLowerCase();
+	if(lower.endsWith(".tif") || lower.endsWith(".tiff")){
+		String txtPath = path.substring(0, path.lastIndexOf(".")) + ".txt";
+		File txt = new File(txtPath);
+		if(txt.exists() && txt.canRead()){
+			IJ.log(PLUGINNAME + ": you selected an image (" + chosen.getName()
+				+ "); loading the matching metadata file instead (" + txt.getName() + ").");
+			return txt;
+		}
+	}
+	return chosen;
 }
 
 /**
