@@ -1,9 +1,9 @@
 # ![CiliaQ](https://github.com/hansenjn/CiliaQ/blob/master/Webfiles/20200618%20CiliaQ%20Logo%20Small.png?raw=true) Preparator
 An ImageJ plugin to prepare images for analysis with [CiliaQ](https://github.com/hansenjn/CiliaQ). For all information on how to install, use, and cite CiliaQ_Preparator, please visit the [CiliaQ repository](https://github.com/hansenjn/CiliaQ), which offers a user guide and a wiki for the whole CiliaQ analysis workflow.
 
-Copyright (C) 2019-2023: Jan N. Hansen (contact: jan.hansen (at) uni-bonn.de).
+Copyright (C) 2019-2026: Jan N. Hansen (contact: jan.hansen (at) uni-bonn.de).
 
-CiliaQ_Preparator has been developed in the research group [Biophysical Imaging, Institute of Innate Immunity, Bonn, Germany](https://www.iiibonn.de/dagmar-wachten-lab/dagmar-wachten-lab-science).
+CiliaQ_Preparator has been originally developed in the research group [Biophysical Imaging, Institute of Innate Immunity, Bonn, Germany](https://www.iiibonn.de/dagmar-wachten-lab/dagmar-wachten-lab-science) and is since then maintained by Jan Hansen.
 
 ## Download
 Download the latest version of the CiliaQ_Preparator plugin file (.jar file) from the [release page](https://github.com/hansenjn/CiliaQ_Preparator/releases).
