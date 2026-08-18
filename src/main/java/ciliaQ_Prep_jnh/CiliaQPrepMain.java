@@ -192,6 +192,8 @@ public void run(String arg) {
 		gd.setInsets(5,0,0);	gd.addChoice("output number format", nrFormats, nrFormats[0]);
 		gd.setInsets(5,0,0);	gd.addCheckbox("Keep computer awake during processing", keepAwake);
 		
+		gd.addHelp("https://github.com/hansenjn/ciliaq/");
+		
 		gd.showDialog();
 		//show Dialog-----------------------------------------------------------------
 	
