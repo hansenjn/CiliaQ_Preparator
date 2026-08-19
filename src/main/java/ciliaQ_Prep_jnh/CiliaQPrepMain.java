@@ -37,7 +37,6 @@ import ij.io.*;
 import ij.measure.*;
 import ij.plugin.*;
 import ij.process.LUT;
-import ij.text.*;
 import ij.plugin.frame.Recorder;
 import java.awt.GraphicsEnvironment;
 
@@ -638,7 +637,9 @@ public void run(String arg) {
 		   	procImp.hide();
 		   	
 			//start logging metadata
-			TextPanel tp1 = new TextPanel("results");
+			// V0.2.0: a plain text collector rather than ij.text.TextPanel, whose AWT
+			// Scrollbars cannot be constructed under --headless.
+			TextCollector tp1 = new TextCollector("results");
 			addSettingsBlockToPanel(tp1,  startDate, name[task], totSeries[task]>1, series[task], imp);
 			tp1.append("");
 			
@@ -720,6 +721,7 @@ public void run(String arg) {
 			   			for(int t = 0; t < procImp.getNFrames(); t++){
 		   					tp1.append("	" + df0.format(t+1) + "	" + df3.format(thresholdsHyst[t][0]) + "	" + df3.format(thresholdsHyst[t][1]));				
 			   			}
+			   			warnOnHysteresisThresholdOrder(thresholdsHyst, channelIDs [c], task);   // New warning in V0.2.0
 			   			
 			   			try {
 				   			segmentUsingHysteresis(tempImp, progress, thresholdsHyst, procImp, channelIDs [c]);			   				
@@ -2115,7 +2117,7 @@ ImagePlus blurGaussian(ImagePlus imp, double radius) {
 	return outImp;	
 }
 
-private void addFooter(TextPanel tp, Date currentDate){
+private void addFooter(TextCollector tp, Date currentDate){
 	tp.append("");
 	tp.append("Datafile was generated on " + FullDateFormatter2.format(currentDate) + " by '"
 			+PLUGINNAME+"', an ImageJ plug-in by Jan Niklas Hansen (jan.hansen@uni-bonn.de, https://github.com/hansenjn/CiliaQ_Preparator).");
@@ -2408,6 +2410,42 @@ private double [][] getHysteresisThresholds (ImagePlus imp, int settingsID, bool
 }
 
 /**
+ * Hysteresis thresholding needs the low threshold below the high one. Whether the two chosen
+ * METHODS differ is checked once in validateSettings, but the resulting VALUES are only known
+ * here, per image: an auto-threshold algorithm that returns 0 - which happens on sparse images,
+ * where most voxels are exact zeros - inverts the pair. Hysteresis then cannot grow anything and
+ * silently degenerates into a plain threshold at the low value, which looks like a successful
+ * segmentation in the output image. So report it while the numbers are known.
+ * */
+private void warnOnHysteresisThresholdOrder(double thresholds [][], int channel, int task){
+	String offending = "";
+	int affected = 0;
+	for(int t = 0; t < thresholds.length; t++){
+		if(!(thresholds [t][0] < thresholds [t][1])){		// also catches NaN and low == high
+			affected++;
+			if(affected <= 3){
+				offending += (offending.isEmpty() ? "" : ", ")
+					+ "time step " + (t+1) + ": low " + df3.format(thresholds [t][0])
+					+ " >= high " + df3.format(thresholds [t][1]);
+			}
+		}
+	}
+	if(affected == 0)	return;
+
+	progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channel
+		+ ": the hysteresis low threshold is not below the high threshold"
+		+ "\n(" + offending
+		+ (affected > 3 ? ", and " + (affected - 3) + " more time step(s)" : "") + ")."
+		+ "\nHysteresis keeps the regions above the low threshold that contain a voxel above the"
+		+ "\nhigh threshold. With the pair inverted there is nothing left to grow, so the result"
+		+ "\nis simply everything above the low threshold - and if that threshold is also near"
+		+ "\nzero, the whole image. If the threshold is near zero or zero, the output will look"
+		+ "\nsegmented but is not. Choose a more inclusive method for the low threshold and a stricter"
+		+ "\none for the high threshold.",
+		ProgressDialog.NOTIFICATION);
+}
+
+/**
  * @return maximum-intensity-projection image of the specified stack range in the input ImagePlus (imp)
  * startSlice = first slice included into projection (1 < startSlice < NSlices)
  * endSlice = last slice included into projection (1 < endSlice < NSlices)
@@ -2532,7 +2570,7 @@ private boolean requestHysteresisPrefs(String Task, int c) {
 	return true;
 }
 
-private void addSettingsBlockToPanel(TextPanel tp, Date startDate, String name, boolean multiSeries, int series, ImagePlus imp){
+private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String name, boolean multiSeries, int series, ImagePlus imp){
 	tp.append("Starting date:	" + FullDateFormatter.format(startDate));
 	if(multiSeries) {
 		tp.append("Image name:	" + name + "	series:	" + (series+1));
