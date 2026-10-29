@@ -5,13 +5,14 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-		<version>17.1.1</version>
+<!--		<version>17.1.1</version>-->
+		<version>43.0.0</version> <!-- Update in V0.2.1-->
 		<relativePath />
 	</parent> 
  
  	<artifactId>CiliaQ_Preparator_JNH</artifactId>
  	<groupId>JNH</groupId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>0.2.1-SNAPSHOT</version>
  
     <name>CiliaQPrep</name>
     <description>An imagej plugin to preprocess images for CiliaQ analysis.</description>
@@ -92,12 +93,12 @@
  	
  	<repositories>
     	<repository>
-            <id>imagej.public</id>
-            <url>http://maven.imagej.net/content/groups/public</url>
-        </repository>
+        	<id>scijava.public</id>
+        	<url>https://maven.scijava.org/content/groups/public</url>
+    	</repository>
     </repositories>
  
-<!-- TODO: See Optional Dependencies section -->
+	<!-- Optional Dependencies section -->
     <dependencies>
         <!-- ImageJ dependencies -->
         <dependency>
@@ -110,45 +111,93 @@
 			<groupId>ome</groupId>
 			<artifactId>bio-formats_plugins</artifactId>
 			<exclusions>
-				<!-- NB: Guava requires Java 7+, so we exclude it here. -->
+				<!-- Fiji supplies guava; excluded to keep it off this build's classpath. -->
 				<exclusion>
 					<groupId>com.google.guava</groupId>
 					<artifactId>guava</artifactId>
 				</exclusion>
 			</exclusions>
 		</dependency>
+		
 		<dependency>
 			<groupId>ome</groupId>
 			<artifactId>formats-api</artifactId>
 		</dependency>
+		
+		<!-- From v0.2.1 on: Ridge Detection plugin (Steger line detector) - referenced directly in code -->
+        <dependency>
+            <groupId>de.biomedical-imaging.imagej</groupId>
+            <artifactId>ij_ridge_detect</artifactId>
+            <version>1.4.1</version>
+        </dependency>
+
+        <!-- From v0.2.1 on: commons-lang3 - RUNTIME requirement of ij_ridge_detect (LineDetector.detectLines) -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
     </dependencies>  
     
     <build>
-		<plugins>
-			<!--         avoid errors in java doc creation -->			
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-javadoc-plugin</artifactId>
-				<configuration>
-					<additionalparam>-Xdoclint:none</additionalparam>
-				</configuration>
+	    <plugins>
+	        <!-- avoid errors in java doc creation -->
+	        <plugin>
+	            <groupId>org.apache.maven.plugins</groupId>
+	            <artifactId>maven-javadoc-plugin</artifactId>
+	            <configuration>
+	                <doclint>none</doclint>
+	            </configuration>
+	        </plugin>
+	
+	        <plugin>
+	            <artifactId>maven-jar-plugin</artifactId>
+	            <configuration>
+	                <archive>
+	                    <manifest>
+	                        <mainClass>${main-class}</mainClass>
+	                    </manifest>
+	                </archive>
+	            </configuration>
+	        </plugin>
+	        
+	        <!-- Disable the SciJava parent's inherited populate-app: it copies the WHOLE dependency
+	             tree into Fiji (and upgrades shared libs like slf4j), which prevents testing the
+	             plugin as a bare single-jar install. We copy only our own jar via antrun below. -->
+	        <plugin>
+	            <groupId>org.scijava</groupId>
+	            <artifactId>scijava-maven-plugin</artifactId>
+	            <executions>
+	                <execution>
+	                    <id>populate-app</id>
+	                    <phase>none</phase>
+	                </execution>
+	            </executions>
+	        </plugin>
+	        
+	        <!-- copy to local FIJI upon building -->
+	        <plugin>
+			    <groupId>org.apache.maven.plugins</groupId>
+			    <artifactId>maven-antrun-plugin</artifactId>
+			    <executions>
+			        <execution>
+			            <id>copy-jar-to-fiji</id>
+			            <phase>package</phase>
+			            <goals><goal>run</goal></goals>
+			            <configuration>
+			                <target>
+			                    <!-- delete first: Windows allows deleting a loaded jar (handle stays open),
+			                         then we write a fresh file - this avoids the overwrite-in-use lock -->
+			                    <delete>
+			                        <fileset dir="${scijava.app.directory}/plugins"
+			                                 includes="${project.artifactId}-*.jar"/>
+			                    </delete>
+			                    <copy file="${project.build.directory}/${project.artifactId}-${project.version}.jar"
+			                          todir="${scijava.app.directory}/plugins"/>
+			                </target>
+			            </configuration>
+			        </execution>
+			    </executions>
 			</plugin>
-			
-			<plugin>
-				<artifactId>maven-jar-plugin</artifactId>
-				<configuration>
-					<projectName>CiliaQ_Preparator plugin for ImageJ.</projectName>
-					<organizationName>Jan Niklas Hansen</organizationName>
-					<descriptorRefs>
-            			<descriptorRef>jar-with-dependencies</descriptorRef>
-          			</descriptorRefs>
-					<archive>
-						<manifest>
-							<mainClass>${main-class}</mainClass>
-						</manifest>
-					</archive>
-				</configuration>
-			</plugin>
-		</plugins>
+	    </plugins>
 	</build>
 </project>
