@@ -42,13 +42,17 @@ public class Processing {
 			pD.updateBarText("Canny 3D: thresholding image");
 	
 			double lowThr, highThr;
-			if (pS.lowThrAlgorithm == "Custom") {
+			if (pS.customValueForLowThreshold()) {
+				/** Bug fixed in V0.2.1, before the if clause was just checking whether algorithm was "Custom" but in fact the algorithm was
+				  * called "Custom Value" so this could never be true */
 				lowThr = pS.lowThr; // use custom value
 			} else {
 				IJ.setAutoThreshold(edges, pS.lowThrAlgorithm + " dark stack");
 				lowThr = edges.getProcessor().getMinThreshold(); // calculate from stack
 			}
-			if (pS.highThrAlgorithm == "Custom") {
+			if (pS.customValueForHighThreshold()) {
+				/** Bug fixed in V0.2.1, before the if clause was just checking whether algorithm was "Custom" but in fact the algorithm was
+				  * called "Custom Value" so this could never be true */
 				highThr = pS.highThr; // use custom value
 			} else {
 				IJ.setAutoThreshold(edges, pS.highThrAlgorithm + " dark stack");
