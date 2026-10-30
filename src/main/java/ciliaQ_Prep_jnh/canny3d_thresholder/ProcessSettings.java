@@ -47,18 +47,18 @@ public class ProcessSettings {
 		ProcessSettings inst = new ProcessSettings(); // returned instance of ImageSetting class
 		GenericDialog gd = new GenericDialog(pluginName + " - Image Processing Settings");
 		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann), modified by J.N. Hansen (last mod.: Sep 19, 2023)",
-				new Font("Sansserif", Font.BOLD, 14));
-		gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, new Font("Sansserif", Font.PLAIN, 16));
-		gd.setInsets(0,0,0);	gd.addMessage("Canny 3D Thresholder requires the installation of additional packages in your FIJI/ImageJ distribution.", new Font("Sansserif", 2, 12));
-		gd.setInsets(-5,0,0);	gd.addMessage("Please read the paragraph Installation at:", new Font("Sansserif", 2, 12));
-		gd.setInsets(-5,20,0);	gd.addMessage("https://github.com/sRassmann/canny3d-thresholder.", new Font("Sansserif", 2, 12));
+				ciliaQ_Prep_jnh.CiliaQPrepMain.HEADING_FONT);
+		gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT);
+		gd.setInsets(0,0,0);	gd.addMessage("Canny 3D Thresholder requires the installation of additional packages in your FIJI/ImageJ distribution.", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
+		gd.setInsets(-5,0,0);	gd.addMessage("Please read the paragraph Installation at:", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
+		gd.setInsets(-5,20,0);	gd.addMessage("https://github.com/sRassmann/canny3d-thresholder.", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
 		
 		gd.setInsets(0,0,0);	gd.addNumericField("Sigma for Gaussian blur (pixels)", inst.gaussSigma, 4);
 		gd.setInsets(0,0,0);	gd.addNumericField("Alpha (sensitivity for edge detection)", inst.cannyAlpha, 4);
 		gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", thrAlgorithms, inst.lowThrAlgorithm);
-		gd.setInsets(0,0,0);	gd.addNumericField("Value (if custom value is chosen)", inst.lowThr, 8);
+		gd.setInsets(0,0,0);	gd.addNumericField("Low threshold value (if custom value is chosen)", inst.lowThr, 8);
 		gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", thrAlgorithms, inst.highThrAlgorithm);
-		gd.setInsets(0,0,0);	gd.addNumericField("Value (if custom value is chosen)", inst.highThr, 8);
+		gd.setInsets(0,0,0);	gd.addNumericField("High threshold value (if custom value is chosen)", inst.highThr, 8);
 
 		// show Dialog-----------------------------------------------------------------
 		gd.showDialog();
