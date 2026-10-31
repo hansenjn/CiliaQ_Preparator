@@ -1,6 +1,5 @@
 package ciliaQ_Prep_jnh.ridge_detection;
 
-import java.io.File;
 import java.util.HashMap;
 import java.util.HashSet;
 
@@ -124,7 +123,7 @@ public class RidgeSegmenter {
 		});
 		
 		for (int z = 0; z < D; z++) {
-			progress.updateBarText("Ridge detection slice " + z);			
+			progress.updateBarText("Ridge detection slice " + (z + 1) + "/" + D);
 			ImageProcessor ip = channelImp.getStack().getProcessor(z + 1);
 			int[] lab = new int[W * H];
 			int nLines = 0;
@@ -161,7 +160,7 @@ public class RidgeSegmenter {
 				}
 				// Any other failure on one plane must not lose the others.
 				progress.notifyMessage("CiliaQ Preparator: ridge detection failed on plane "
-				            + (z + 1) + " - " + trace, ProgressReporter.NOTIFICATION);
+	            			+ (z + 1) + " - " + e + trace, ProgressReporter.NOTIFICATION);
 			}
 			perPlane[z] = lab;
 			perPlaneCount[z] = nLines;
@@ -409,19 +408,21 @@ public class RidgeSegmenter {
 	 */
 	public static void applyGlasbeyLut(ImagePlus imp, int channel) {
 		try {
-			// preferred first; fall back to other Glasbey variants if the dark one is not installed
-			String[] candidates = { "glasbey_on_dark.lut", "glasbey_inverted.lut", "glasbey.lut"};
-			File found = null;
-			for (int i = 0; i < candidates.length && found == null; i++) {
-				// stop at the first that exists
-				File f = new File(IJ.getDirectory("luts") + candidates[i]);
-				if (f.exists()) found = f;
+			// preferred first; fall back to other Glasbey variants if the dark one is not installed.
+			// LutLoader.getLut finds a LUT by name in Fiji's luts folder, reads the binary and the text
+			// formats (Fiji's Glasbey LUTs are text; glasbey.lut has a header row), and returns null without
+			// a message if the LUT is not installed.
+			String[] candidates = { "glasbey_on_dark", "glasbey_inverted", "glasbey" };
+			java.awt.image.IndexColorModel cm = null;
+			for (int i = 0; i < candidates.length && cm == null; i++) {
+				cm = ij.plugin.LutLoader.getLut(candidates[i]);	// stop at the first that exists
 			}
-			
-			if (found == null) return;	// no Glasbey LUT installed - leave the display as is
-			
-			LUT lut = openLut(found);
-			if (lut == null) return;	// unreadable file - skip, cosmetic only
+			if (cm == null) return;	// no Glasbey LUT installed - leave the display as is
+
+			byte[] r = new byte[256], g = new byte[256], b = new byte[256];
+			cm.getReds(r); cm.getGreens(g); cm.getBlues(b);
+			r[0] = 0; g[0] = 0; b[0] = 0;	// index 0 is background (labels start at 1): keep it black, as before
+			LUT lut = new LUT(r, g, b);
 			
 			if (imp.isComposite()) {
 				// multi-channel: set the LUT on this channel alone, leaving the others untouched
@@ -433,104 +434,6 @@ public class RidgeSegmenter {
 		} catch (Throwable e) {
 			// Never let a missing or malformed LUT stop a segmentation run
 		}
-	}
-
-	/**
-	 * Read a 768-byte raw or ImageJ .lut file into a LUT.
-	 *
-	 * A LUT is 256 colours = three 256-byte tables (red, green, blue) laid out consecutively, 768 bytes
-	 * total. ImageJ .lut files may prepend a header, so the 768-byte table is taken from the END of the
-	 * file. Returns null on any problem - the caller treats a missing/unreadable LUT as cosmetic.
-	 */
-	private static LUT openLut(File f) {
-		try {
-			long len = f.length();
-			if (len < 1) return null;
-			byte[] all = new byte[(int) len];
-			java.io.FileInputStream in = new java.io.FileInputStream(f);
-			try {
-				// read may return fewer bytes per call, so loop until the buffer is full
-				int read = 0;
-				while (read < all.length) {
-					int n = in.read(all, read, all.length - read);
-					if (n < 0) return null;		// stream ended early - unreadable
-					read += n;
-				}
-			} finally { in.close(); }
-
-			byte[] r = new byte[256], g = new byte[256], b = new byte[256];
-
-			/*
-			 * ImageJ .lut files come in two formats:
-			 *   - BINARY: 768 raw bytes (256 R, 256 G, 256 B), optionally after a header.
-			 *   - ASCII : 256 text lines, each "R G B" as decimal numbers (possibly with an index column).
-			 * Many Fiji LUTs (including glasbey_on_dark.lut) are ASCII, which the old binary-only reader
-			 * misparsed into garbage colours. Try ASCII first (detect by presence of digits + whitespace
-			 * and no high-bit bytes), else fall back to the binary layout.
-			 */
-			if (looksLikeAscii(all)) {
-				if (!parseAsciiLut(new String(all, "US-ASCII"), r, g, b)) return null;
-			} else {
-				if (len < 768) return null;
-				int off = (int) (len - 768);	// header, if any, sits before the 3x256 table
-				System.arraycopy(all, off, r, 0, 256);
-				System.arraycopy(all, off + 256, g, 0, 256);
-				System.arraycopy(all, off + 512, b, 0, 256);
-			}
-
-			// Force index 0 (background) to black: labels start at 1, so index 0 is always background.
-			r[0] = 0; g[0] = 0; b[0] = 0;
-
-			return new LUT(r, g, b);
-		} catch (Throwable e) {
-			return null;
-		}
-	}
-
-	/** Heuristic: a LUT is ASCII if its bytes are all printable/whitespace (no raw high-bit values). */
-	private static boolean looksLikeAscii(byte[] data) {
-		int sample = Math.min(data.length, 2048);	// first 2 KB is plenty to decide
-		boolean sawDigit = false;
-		for (int i = 0; i < sample; i++) {
-			int c = data[i] & 0xff;
-			if (c >= '0' && c <= '9') { sawDigit = true; continue; }
-			// allow space, tab, CR, LF, and a few separators; anything else (esp. >126) means binary
-			if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',' || c == '.') continue;
-			return false;	// a non-text byte -> treat as binary
-		}
-		return sawDigit;
-	}
-
-	/**
-	 * Parse an ASCII LUT: 256 lines of whitespace-separated integers. Each line is either "R G B" or
-	 * "index R G B"; in the 4-column case the first column (the index) is dropped. Returns false if fewer
-	 * than 256 colour rows are found.
-	 */
-	private static boolean parseAsciiLut(String text, byte[] r, byte[] g, byte[] b) {
-		String[] lines = text.split("\\r?\\n");
-		int row = 0;
-		for (int i = 0; i < lines.length && row < 256; i++) {
-			String line = lines[i].trim();
-			if (line.isEmpty()) continue;
-			String[] tok = line.split("[\\s,]+");
-			int rc, gc, bc;
-			if (tok.length >= 4) {			// "index R G B" -> skip the index column
-				rc = Integer.parseInt(tok[1]);
-				gc = Integer.parseInt(tok[2]);
-				bc = Integer.parseInt(tok[3]);
-			} else if (tok.length == 3) {	// "R G B"
-				rc = Integer.parseInt(tok[0]);
-				gc = Integer.parseInt(tok[1]);
-				bc = Integer.parseInt(tok[2]);
-			} else {
-				continue;					// not a colour row (header/comment) - skip
-			}
-			r[row] = (byte) (rc & 0xff);
-			g[row] = (byte) (gc & 0xff);
-			b[row] = (byte) (bc & 0xff);
-			row++;
-		}
-		return row >= 256;
 	}
 
 	// ------------------------------------------------------------------ writing

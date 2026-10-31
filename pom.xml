@@ -124,15 +124,9 @@
 			<artifactId>formats-api</artifactId>
 		</dependency>
 		
-		<!-- From v0.2.1 on: Ridge Detection plugin (Steger line detector) - referenced directly in code -->
-        <dependency>
-            <groupId>de.biomedical-imaging.imagej</groupId>
-            <artifactId>ij_ridge_detect</artifactId>
-            <version>1.4.1</version>
-        </dependency>
-
-        <!-- From v0.2.1 on: commons-lang3 - RUNTIME requirement of ij_ridge_detect (LineDetector.detectLines) -->
-        <dependency>
+      	<!-- From v0.2.1 on: commons-lang3 - used by the vendored Steger detector
+        	(ciliaQ_Prep_jnh.ij_ridge_detector_steger: MutableInt / MutableDouble / MutableLong) -->
+		<dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
         </dependency>

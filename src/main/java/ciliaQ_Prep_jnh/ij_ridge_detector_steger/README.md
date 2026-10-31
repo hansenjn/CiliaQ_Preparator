@@ -101,18 +101,17 @@ detections within one JVM session. Several internal steps iterate `HashSet<Integ
 IDs (iteration order depends on the integer values), so a different ID range gave different
 processing order. A single `Line.resetCounter();` was added at the top of
 `LineDetector.detectLines(...)` so every detection starts from id 0 and is reproducible.
-(`Line.resetCounter()` already existed in the original but was never called.)
+(`Line.resetCounter()` already existed in the original but was never called; it was made
+`public` so `LineDetector` can call it.)
 
 5. **Deterministic iteration of line-ID set in junction reconstruction** (`LineDetector.java`).
 In `addAdditionalJunctionPointsAndLines`, the set of connected line IDs (`lineIds`) was a
 `HashSet<Integer>` that is **iterated** to create new junctions. `HashSet<Integer>` iterates
 in an order determined by the integer values, so the created junctions — and the resulting
 lines — were not reproducible. Changed to `LinkedHashSet<Integer>` (insertion order, which is
-driven by deterministic loops). *(The non-iterated sets `uniqueIDs` and
-`alreadyProcessedJunctionPoints`, used only for `contains`/`add`, were left unchanged, as
-their iteration order does not affect the result.)*
-
-
+driven by deterministic loops). *(`uniqueIDs` in `fixJunctions` was switched to
+`LinkedHashSet` as well, for consistency, although it is only used for `contains`/`add`.
+`alreadyProcessedJunctionPoints` was left a `HashSet`: it is never iterated.)*
 
 6. **Deterministic collections in overlap resolution** (`SlopeOverlapResolver.java`) — the
 largest source of non-determinism. This resolver runs when `OverlapOption.SLOPE` is used
@@ -127,6 +126,11 @@ were non-reproducible on identical input, and differed even across a JVM restart
 preserve insertion order (driven by deterministic loops over `junctions`/`lines`). Only the
 collection type changed; `contains`/`add`/`get`/`put` semantics are identical.
 
+7. **Stand-alone plugin GUI removed.** `Lines_.java` (the Ridge Detection menu command and its
+dialog), `GenericDialogPlus.java` and `ResetToDefaultListener.java` were deleted. CiliaQ calls
+`LineDetector.detectLines(...)` directly and never uses them; the copy compiles without them. This
+also removes a second class named `Lines_`, which follows ImageJ's plugin-naming convention. To
+re-sync with upstream, ignore these three files.
 
 
 ### Scope / what was NOT changed
@@ -134,45 +138,47 @@ collection type changed; `contains`/`add`/`get`/`put` semantics are identical.
 - The detection, linking, width, and correction mathematics are untouched.
 
 
-
 ## Observations and open questions (not addressed here)
 
 These are pre-existing characteristics of the original algorithm that were noticed during the
-determinism work but **deliberately left unchanged**, because they concern algorithmic
-*correctness* (what the algorithm computes), not *reproducibility* (that it computes the same
-thing every time), which was the goal here. They are recorded for future investigation.
+determinism work but **deliberately left unchanged**, because they concern what the algorithm computes,
+not *reproducibility*. They are recorded for future investigation.
 
-1. **"No main line" fallback in `fixJunctions` (`LineDetector.java`).** At some junction
-positions the code cannot identify a "main" (through-) line and falls back to connecting the
-secondary lines pairwise. The original author flagged this with the comment
-*"In manchen Fällen gibt es keine Hauptlinie... (bug im Algorithmus, ich bin aber nicht fähig
-ihn zu finden)"* ("In some cases there is no main line... bug in the algorithm, but I'm not
-able to find it"). A likely benign explanation is that, after lines are split at junctions in
-`Link.compute_contours`, a point that was *interior* to a line becomes an *endpoint* of the two
-split pieces, so no line reports it as interior — in which case the fallback is expected
-behaviour rather than a bug. Whether this is ever harmful on real data is unknown and was not
-measured here. The determinism fixes ensure this fallback now fires **consistently**, so even
-if the underlying handling is imperfect, the output is reproducible.
+1. **"No main line" fallback in `fixJunctions` (`LineDetector.java`) — measured: mostly expected,
+partly a real miss.** At a junction position where no line passes *through* the point, the code
+falls back to connecting the lines that end there pairwise. The original author called this a bug
+(*"In manchen Fällen gibt es keine Hauptlinie… (bug im Algorithmus, ich bin aber nicht fähig ihn zu
+finden)"*). Measured on 2026-10-30, it is not rare — it is the usual path: **834 of 1073** junction
+positions (78 %) on a 2160 × 2160 ICC (immunocytochemistry) IF (immunofluorescence) image, 173 of 229
+(76 %) on a 1 µm/px tissue IF image. Grouped by how many distinct lines *end* at the junction:
 
-2. **Coordinate (x/y) swap in `fixJunctions` (`LineDetector.java`).** The method begins by
-swapping each junction's `x` and `y`:
+| lines ending at the junction | 1 | 2 | 3 | 4 | 5+ |
+|---|---|---|---|---|---|
+| ICC IF image | 80 | 14 | 627 | 100 | 13 |
+| tissue IF image | 8 | 0 | 100 | 52 | 13 |
 
-```java
-// "For some reason, the x and y coordinates are permuted"
-float help = junction.x; junction.x = junction.y; junction.y = help;
-```
+- **Three or more ends (~90 %) — expected, not a bug.** The through line was already split at this
+point in `Link.compute_contours`, so a T-junction shows three ends and a crossing four. No line has
+the point as an interior point, and pairing the ends is the right handling. The benign explanation
+suspected earlier is correct for these.
+- **Exactly one end (5–10 %) — a real miss.** A side line ends next to a through line, but the through
+line's nearest sample point is more than 0.1 px away: the test is `mindist[0] < 0.1`, while ridge
+points are sub-pixel. The through line is not recognised, the fallback finds a single line, forms
+no pair, and **the junction is dropped**.
 
-The original author performs this swap without a documented reason. It suggests arow/col vs.
-x/y convention mismatch between where junctions are created (Link.compute_contours, which sets
-junc.x = posx[...] (row) and junc.y = posy[...] (col)) and where they are matched back to
-lines (minDistance, which compares against l.col/l.row). This swap may be related to the
-"no main line" fallback above (an incorrect coordinate match would prevent finding an interior
-point). It was not changed, as doing so would alter algorithmic output and requires careful
-validation against known structures. Flagged for future investigation.
+2. **Coordinate (x/y) swap in `fixJunctions` (`LineDetector.java`) — correct and required.**
+`Link.compute_contours` stores junctions in Steger's (row, column) order — `junc.x = posx[…]` /
+`row[…]`, `junc.y = posy[…]` / `col[…]` — while `minDistance` compares them with `l.col` / `l.row`,
+i.e. image x = column, y = row. The swap converts one into the other.
+Not a bug; the code comment now says why (`CiliaQ-MOD`, comment only).
+
+Widening the 0.1 px tolerance is not a safe fix. It also accepts unrelated nearby lines as the through
+line. A correct fix would target only the one-end case. Left unchanged, as it would alter output against
+the published algorithm; the determinism fixes make the behaviour reproducible either way.
 
 ## Reporting upstream
 
-On 10/29/2026, we submitted a **pull request** (determinism fixes, https://github.com/thorstenwagner/ij-ridgedetection/pull/42)
+On 2026-10-29, we submitted a **pull request** (determinism fixes, https://github.com/thorstenwagner/ij-ridgedetection/pull/42)
 with the ordering/determinism changes listed under "Modifications made to the original" above.
 
 ## Maintenance note

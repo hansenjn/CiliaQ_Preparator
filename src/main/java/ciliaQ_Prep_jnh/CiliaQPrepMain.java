@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: October 29, 2026)
+* Date: September 29, 2019 (This Version: October 31W, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -217,12 +217,12 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	boolean keepAwake;
 	Robot robo;
 	
-	/** Avoiding dual run of CiliaQ Preparator in same FIJI
-	 *  True while a CiliaQ Preparator run is executing in this JVM. A second concurrent run in the same
-	 *  Fiji would share the Ridge Detection plugin's static Line.idCounter (and other static state),
-	 *  making both runs' ridge results non-reproducible and potentially interleaving the counter reset.
-	 *  So a second run is refused until the first finishes. Separate Fiji processes have their own JVM and
-	 *  are unaffected. */
+	/** Avoiding dual run of CiliaQ Preparator in same FIJI for safety.
+	 *	True while a CiliaQ Preparator run is executing in this JVM. This avoids a second concurrent
+	 *  run in the same Fiji, preventing any possible collision of two runs sharing variables or
+	 *  methods. E.g., Fiji would share the static Line.idCounter of the ridge detector (and other static
+	 *  state), making both runs' ridge results non-reproducible and potentially interleaving the
+	 *  counter reset. Also other downstream methods like the 3D ImageJ Suite could collide.*/
 	private static volatile boolean runInProgress = false;
 	
 public void run(String arg) {
@@ -230,8 +230,10 @@ synchronized(CiliaQPrepMain.class){
     if(runInProgress){
         IJ.error(PLUGIN_NAME + " V" + PLUGIN_VERSION, "A " + PLUGIN_NAME + " run is already in progress in this Fiji."
             + "\nPlease wait for it to finish before starting another or cancel and restart Fiji."
-            + "\n(Running two at once in the same Fiji would make ridge-detection results non-reproducible,"
-            + "\nbecause the Ridge Detection plugin keeps shared internal state.)");
+            + "\nAlternatively, just duplicate your Fiji installation folder and start a completely independent, second Fiji"
+            + "\nto safely run multiple instances in parallel."
+            + "\n(Reason: Running two Preparators in the same Fiji could, e.g., make ridge-detection results non-reproducible,"
+            + "\nbecause the ridge detector keeps shared internal states.)");
         return;
     }
     runInProgress = true;
@@ -911,7 +913,6 @@ try {
 		   							procImp, channelIDs [c], c, tp1);
 		   				}catch(Exception e) {
 		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Ridge detection failed."
-		   							+ "\nVerify that the Ridge Detection plugin and commons-lang3 are installed."
 		   							+ "\nError message: " + e.getMessage()
 									+ "\nError localized message: " + e.getLocalizedMessage()
 									+ "\nError cause: " + e.getCause() 
@@ -3171,7 +3172,7 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 	for(int c = 0; c < channelIDs.length; c++){
 		if(keepAwake)	stayAwake();
 		if(channelIDs [c] < 1 || channelIDs [c] > procImp.getNChannels())	continue;
-		long total = 0, fg = 0, origNonZero = 0;
+		long total = 0, fg = 0, origNonZero = 0, keptNonZero = 0;
 		for(int t = 0; t < procImp.getNFrames(); t++){
 			for(int sl = 0; sl < procImp.getNSlices(); sl++){
 				int iOut = procImp.getStackIndex(channelIDs [c], sl+1, t+1)-1;
@@ -3182,13 +3183,35 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 				total += n;
 				for(int i = 0; i < n; i++){
 					if(pOut.getf(i) != 0f)	fg++;
-					if(pIn.getf(i) != 0f)	origNonZero++;
+					if(pIn.getf(i) != 0f){
+						origNonZero++;
+						if(pOut.getf(i) != 0f) {
+							keptNonZero++;	// non-zero in the input AND kept in the mask
+						}
+					}
 				}
 			}
 		}
 		double pct = total > 0 ? (100.0 * fg / total) : 0.0;
 		tp1.append("	" + df0.format(channelIDs [c]) + "	" + total + "	" + fg + "	"
 				+ df3.format(pct) + "	" + origNonZero);
+		
+		/*
+		 * THRESHOLD HAD NO EFFECT. The input has a background of exactly 0, and the mask still kept every
+		 * non-zero voxel: the threshold sat below the lowest non-zero intensity, so it separated nothing,
+		 * and any other auto-threshold method below that value gives the identical mask. Typical for
+		 * exports rescaled from a low-bit source (e.g. Human Protein Atlas images).
+		 */
+		if(origNonZero > 0 && origNonZero < total && keptNonZero == origNonZero){
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
+				+ ": the segmentation kept every non-zero voxel of the input (" + origNonZero + "), so the"
+				+ " threshold separated nothing beyond the zero background. Another auto-threshold method"
+				+ " may give the same mask - evaluate the ouput and consider to refine preprocessing,"
+				+ " or use RIDGE or SPOT DETECTION instead.",
+				ProgressReporter.NOTIFICATION);
+			tp1.append("		WARNING	the segmentation kept every non-zero voxel of the input - the threshold"
+				+ " separated nothing beyond the zero background");
+		}
 
 		/*
 		 * ZERO-INTENSITY LOSS. Written for every channel that kept intensities, so the loss is visible
@@ -4025,31 +4048,6 @@ private void countSegmentedVoxel(ImagePlus imp, int x, int y, int z){
 	}
 }
 
-/**
- * Stretch a segmented channel's display range so its content is visible: label images (values 1..N)
- * and binary/thresholded masks otherwise sit near-black against the full bit-depth range. Display only;
- * pixel values are untouched.
- */
-private void autoRangeSegmentedChannel(ImagePlus imp, int channel){
-	int idx = imp.getStackIndex(channel, 1, 1);
-	double min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
-	for(int s = 0; s < imp.getNSlices(); s++){
-		for(int t = 0; t < imp.getNFrames(); t++){
-			ij.process.ImageProcessor ip =
-				imp.getStack().getProcessor(imp.getStackIndex(channel, s+1, t+1));
-			for(int i = 0; i < ip.getPixelCount(); i++){
-				float v = ip.getf(i);
-				if(v < min) min = v;
-				if(v > max) max = v;
-			}
-		}
-	}
-	if(max < min) return;			// empty
-	if(max == min) max = min + 1;	// avoid a zero-width range
-	imp.setC(channel);
-	imp.setDisplayRange(min, max);
-}
-
 private boolean requestHysteresisPrefs(String task, int c) {
 	GenericDialog gd = new GenericDialog(PLUGIN_NAME + " - Hysteresis thresholding");
 	gd.addMessage(PLUGIN_NAME + " - Version " + PLUGIN_VERSION + "",
@@ -4141,7 +4139,9 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 			tp.append("			Custom threshold value:	" + df6.format(customThr [i]));
 		}else if (RIDGE_DETECTION.equals(chosenAlgorithms[i])){
 			tp.append("		Segmentation method:	" + "RIDGE DETECTION (filaments), Steger line detector"
-					+ " via the Ridge Detection plugin by Thorsten Wagner and Mark Hiner,"
+					+ " - CiliaQ's modified, deterministic copy of the Ridge Detection plugin by Thorsten"
+					+ " Wagner and Mark Hiner (upstream commit ad4f34d; changes listed on"
+					+ " github.com/hansenjn/CiliaQ_Preparator),"
 					+ " see https://imagej.net/plugins/ridge-detection for a description.");
 			tp.append(indentReport(ridgeSettings [i].report()));
 			if(separateTimesteps[i]) {
@@ -4269,12 +4269,20 @@ private String matchThrAlgorithm(String saved, String fallback){
 
 /**	@return the raw value whose key starts with keyPrefix, or null. Prefix matching keeps callers free of
 *	the unit suffixes in the keys, e.g. "Expected filament width (px)". Use this rather than
-*	HashMap.get: an exact get() silently misses every key that carries a unit. */
+*	HashMap.get: an exact get() silently misses every key that carries a unit.
+*
+*	New V0.2.1: an exact label wins; otherwise the SHORTEST label that starts with keyPrefix (ties broken
+*	alphabetically, so the result never depends on HashMap order). "Tile size" still finds "Tile size (px)",
+*	but "Signal percentile" can no longer pick up "Signal percentile (per tile)". */
 private String blockValue(java.util.HashMap<String,String> kv, String keyPrefix){
-	for(java.util.Map.Entry<String,String> e : kv.entrySet()){
-		if(e.getKey().startsWith(keyPrefix))	return e.getValue();
+	String exact = kv.get(keyPrefix);
+	if(exact != null)	return exact;
+	String best = null;
+	for(String k : kv.keySet()){
+		if(!k.startsWith(keyPrefix))	continue;
+		if(best == null || k.length() < best.length() || (k.length() == best.length() && k.compareTo(best) < 0))	best = k;
 	}
-	return null;
+	return best == null ? null : kv.get(best);
 }
 
 private double blockDouble(java.util.HashMap<String,String> kv, String keyPrefix, double fallback){

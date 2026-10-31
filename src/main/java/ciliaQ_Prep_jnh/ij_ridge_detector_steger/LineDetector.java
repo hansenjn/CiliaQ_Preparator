@@ -428,6 +428,12 @@ public class LineDetector {
 	private Junctions fixJunctions(Lines lines, Junctions junctions) {
 		/*
 		 * For some reason, the x and y coordinates are permuted
+		 *
+		 * CiliaQ-MOD (comment only): the reason is a convention change. Link.compute_contours stores a
+		 * junction in Steger's (row, column) order - junc.x = row, junc.y = column - while minDistance
+		 * below compares it with l.col / l.row, i.e. image x = column, y = row. The swap converts one into
+		 * the other and is required: without it, 1072 of 1073 junctions on a 2160 x 2160 sperm plane
+		 * match no line (median distance 20 px) and the line count drops from 1673 to 1374.
 		 */
 		for (Junction junction : junctions) {
 			float help = junction.x;
