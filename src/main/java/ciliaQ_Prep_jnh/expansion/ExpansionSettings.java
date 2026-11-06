@@ -81,6 +81,14 @@ public class ExpansionSettings {
 				ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
 		rs.lineWidth = ridgeWidth;
 		rs.sensitivity = ridgeSensitivity;
+		
+		/*	Seeding keeps the classic z handling and no clean-up rules (no short pieces joined or dropped
+		 *	either), as before the z method and the rules existed; the seed dialog does not expose them yet (to be
+		 *	designed with the seed tool). */
+		rs.zMethod = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.Z_CLASSIC;
+		rs.branchRule = false;
+		rs.crossingRule = false;
+		rs.shortPieces = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_APART;
 		return rs;
 	}
 

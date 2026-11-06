@@ -1,7 +1,11 @@
 package ciliaQ_Prep_jnh.ridge_detection;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import ciliaQ_Prep_jnh.ProgressReporter;
 import ciliaQ_Prep_jnh.ij_ridge_detector_steger.Line;
@@ -9,7 +13,6 @@ import ciliaQ_Prep_jnh.ij_ridge_detector_steger.LineDetector;
 import ciliaQ_Prep_jnh.ij_ridge_detector_steger.Lines;
 import ciliaQ_Prep_jnh.ij_ridge_detector_steger.OverlapOption;
 
-import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
 import ij.CompositeImage;
@@ -32,12 +35,16 @@ import ij.process.ShortProcessor;
  *     stack-wide statistics (in RidgeSettings) and reused for every plane - deriving them per slice
  *     makes the line count swing wildly from plane to plane, which is threshold inconsistency rather
  *     than real structure and makes z-linking impossible.
- *  2. Z-LINKING BY PIXEL OVERLAP. Lines in adjacent planes that share any pixel are merged with a
- *     union-find, so a filament running through several slices becomes one object. The overlap is NOT
- *     dilated: dilation raises the overlap rate and worsens the known over-fusion.
- *  3. OVER-FUSION AT CROSSINGS IS ACCEPTED. Where filaments cross they share pixels, so overlap-linking
- *     fuses them into one object. Separating crossings by intensity is not possible, and de-cluttering
- *     is deliberately left to CiliaQ, which owns the skeleton machinery.
+ *  2. THE Z METHOD (RidgeSettings.zMethod, new in v0.2.1). Classic 2D (below, and every single-plane image)
+ *     paints every plane a line is found in and joins lines of adjacent planes that share pixels (union-find,
+ *     largest overlap first; the overlap is NOT dilated, dilation raises the over-fusion). "2D in-focus
+ *     plane" and "3D" keep each detection only in its in-focus plane and join it to its 3D neighbours; 3D
+ *     also pairs the branches of crossings across planes (RidgeZ).
+ *  3. CLEAN-UP RULES (RidgeCleanup, new in v0.2.1). Per plane, lines that belong to different filaments -
+ *     a line ending on another's side, two lines traced through one crossing, optionally lines running
+ *     side by side or the arms of a kink - are kept apart: they are never joined into one object.
+ *     The minimum length applies to the finished object (its distinct xy positions in classic), so the
+ *     short in-focus pieces of a tilted filament are not lost; Steger keeps pieces down to 2 px per plane.
  *  4. CONSECUTIVE LABELS. Final labels are consecutive positive integers from 1, numbered from the
  *     voxels actually painted (not from line indices - a line fully covered by an earlier line keeps an
  *     id but no pixels). Labels wrap at 2^24, above which float32 can no longer hold consecutive
@@ -58,7 +65,8 @@ import ij.process.ShortProcessor;
  * > Steger, C., 1998. An unbiased detector of curvilinear structures.
  * IEEE Transactions on Pattern Analysis and Machine Intelligence, 20(2), pp.113–125.
  * 
- * and follows ImageJ's implementation: https://imagej.net/plugins/ridge-detection.
+ * and uses a corrected copy of ImageJ's implementation (https://imagej.net/plugins/ridge-detection),
+ * vendored in ciliaQ_Prep_jnh.ij_ridge_detector_steger - its README lists what was changed and why.
  *
  * Added in v0.2.1.
  *
@@ -103,11 +111,6 @@ public class RidgeSegmenter {
 	 */
 	public static Result detect(ImagePlus channelImp, RidgeSettings rs,  ProgressReporter progress) throws IllegalStateException {
 		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
-		final OverlapOption overlap = rs.resolveCrossings ? OverlapOption.SLOPE : OverlapOption.NONE;
-
-		int[][] perPlane = new int[D][];      // per slice: the label array [y*W + x], one entry per plane (filled in the loop)
-		int[] perPlaneCount = new int[D];     // per slice: how many lines were detected and rasterised in that plane
-		int[] offset = new int[D + 1];        // running start index per slice into the global line numbering (prefix sums of perPlaneCount; offset[D] = total lines)
 
 		// One warning per channel is enough; avoids spam if several planes are slow.
 		final boolean[] warned = { false };
@@ -121,156 +124,290 @@ public class RidgeSegmenter {
 					+ " raise 'contrast sensitivity'. (This message appears once and does not stop"
 					+ " processing.)", ProgressReporter.NOTIFICATION);
 		});
-		
+
+		/*	New V0.2.1: the z method. On a single plane all three methods are the same, so a single plane always takes the
+		 *	classic path (with the clean-up rules). */
+		int[][] perVoxel; int nLines;
+		if (D > 1 && !RidgeSettings.Z_CLASSIC.equals(rs.zMethod)) {
+			if (!channelImp.getCalibration().scaled())	// in-focus and 3D measure distances in z with the voxel size
+				progress.notifyMessage("Ridge detection (" + rs.zMethodToken() + "): this stack has no voxel size, so voxels are treated as"
+						+ " cubes and filaments stacked in z join too easily. Set the voxel size (Image > Properties) and run again.",
+						ProgressReporter.NOTIFICATION);
+			RidgeZ.Output o = RidgeZ.detect(channelImp, rs, RidgeSettings.Z_3D.equals(rs.zMethod), progress, watchdog);
+			perVoxel = o.labels; nLines = o.nLines;
+		} else {
+			int[] nl = new int[1];
+			perVoxel = classic(channelImp, rs, progress, watchdog, nl);
+			nLines = nl[0];
+		}
+		return numbered(perVoxel, nLines, W, H, D);
+	}
+
+	/**
+	 * Classic 2D (all planes): Steger per plane, every line painted in its plane, lines of neighbouring planes joined where
+	 * they share pixels. New V0.2.1:
+	 *  - the clean-up rules run per plane (RidgeCleanup); the pairs they keep apart are never joined, and the joins through z
+	 *    are made best first (largest overlap first), since the order matters once some joins are refused;
+	 *  - last, short pieces next to a filament are joined to it or dropped (step 6, RidgeShortPieces);
+	 *  - the minimum length applies to the finished object, measured on its projection (distinct line positions in xy, so a
+	 *    filament seen in several planes counts once); per plane Steger keeps pieces down to 2 px, so the short in-focus
+	 *    pieces of a tilted filament are not lost.
+	 * @return labels per plane [z][y*W + x] numbered by object (not yet consecutive); nLinesOut[0] = lines detected
+	 */
+	static int[][] classic(ImagePlus channelImp, RidgeSettings rs, ProgressReporter progress, SlowWatchdog watchdog, int[] nLinesOut) {
+		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
+		final OverlapOption overlap = rs.resolveCrossings ? OverlapOption.SLOPE : OverlapOption.NONE;
+		final RidgeCleanup rules = rs.cleanup();
+		final boolean anyRule = rules.any();
+		int[][] perPlane = new int[D][]; // per slice: the label array [y*W + x], local line ids from 1
+		int[] perPlaneCount = new int[D]; // per slice: how many lines were rasterised in that plane
+		int[] offset = new int[D + 1]; // running start index per slice into the global line numbering
+		List<List<float[][]>> linesZ = new ArrayList<List<float[][]>>();
+		List<List<int[]>> apartZ = new ArrayList<List<int[]>>();
+
 		for (int z = 0; z < D; z++) {
 			progress.updateBarText("Ridge detection slice " + (z + 1) + "/" + D);
 			ImageProcessor ip = channelImp.getStack().getProcessor(z + 1);
 			int[] lab = new int[W * H];
-			int nLines = 0;
+			List<float[][]> LS = new ArrayList<float[][]>();
+			List<int[]> apart = new ArrayList<int[]>();
 			try {
-				LineDetector det = new LineDetector();
-				watchdog.arm();						// start the clock for THIS plane
-				Lines lines;
-				try {
-					lines = det.detectLines(ip, rs.sigma, rs.upperThreshold, rs.lowerThreshold,
-							rs.minLength, rs.maxLength, rs.darkLine, rs.correctPosition,
-							rs.estimateWidth, rs.extendLine, overlap);
-				} finally {
-					watchdog.disarm();				// plane finished (or threw) - stop the clock
-				}
-				int cap = Math.max(2000, (W * H) / LINE_CAP_DIVISOR);
-				if (lines.size() > cap) {
-					throw new IllegalStateException("ridge detection produced " + lines.size()
-							+ " lines on plane " + (z + 1) + ", above the safety cap of " + cap
-							+ " (one per " + LINE_CAP_DIVISOR + " pixels). The thresholds are too"
-							+ " permissive for this image - raise 'contrast sensitivity'.");
-				}
-				for (Line l : lines) {
-					nLines++;
-					rasterise(l, lab, W, H, nLines, rs.estimateWidth);
+				Lines lines = detectPlane(ip, rs, MIN_PIECE, overlap, watchdog);
+				checkCap(lines.size(), W, H, z);
+				for (Line l : lines)
+					LS.add(rs.estimateWidth
+							? new float[][] { l.getXCoordinates(), l.getYCoordinates(), l.getResponse(),
+									l.getLineWidthL(), l.getLineWidthR() }
+							: new float[][] { l.getXCoordinates(), l.getYCoordinates(), l.getResponse() });
+				nLinesOut[0] += lines.size();
+				if (anyRule) {
+					rules.setPlane(ip);
+					LS = rules.apply(LS, rs.lineWidth, apart);
 				}
 			} catch (IllegalStateException overCap) {
-	 			/* The safety cap is fatal for the whole channel, not a per-plane hiccup: continuing
-	 			 * would hit the same wall on the next plane, or exhaust the heap before it got there. */
-	 			throw overCap;
+				/*
+				 * The safety cap is fatal for the whole channel, not a per-plane hiccup:
+				 * continuing would hit the same wall on the next plane, or exhaust the heap
+				 * before it got there.
+				 */
+				throw overCap;
 			} catch (Throwable e) {
 				StringBuilder trace = new StringBuilder();
 				for (StackTraceElement line : e.getStackTrace()) {
 					trace.append(" \n ").append(line.toString());
 				}
 				// Any other failure on one plane must not lose the others.
-				progress.notifyMessage("CiliaQ Preparator: ridge detection failed on plane "
-	            			+ (z + 1) + " - " + e + trace, ProgressReporter.NOTIFICATION);
+				progress.notifyMessage(
+						"CiliaQ Preparator: ridge detection failed on plane " + (z + 1) + " - " + e + trace,
+						ProgressReporter.NOTIFICATION);
+				LS = new ArrayList<float[][]>();
+				apart = new ArrayList<int[]>();
 			}
+			int n = 0;
+			for (float[][] L : LS)
+				rasterise(L, lab, W, H, ++n);
 			perPlane[z] = lab;
-			perPlaneCount[z] = nLines;
+			perPlaneCount[z] = n;
+			linesZ.add(LS);
+			apartZ.add(apart);
 		}
 		offset[0] = 0;
-		for (int z = 0; z < D; z++) offset[z + 1] = offset[z] + perPlaneCount[z];
+		for (int z = 0; z < D; z++)
+			offset[z + 1] = offset[z] + perPlaneCount[z];
 		final int totalLines = offset[D];
 
-		/*
-		 * ----------------------------------------------------------------------------
-		 * 
-		 * z-link by pixel overlap, union-find. Known consequence, accepted for v0.2.1: 
-		 * two lines in plane z that both overlap one line in plane z+1 are merged, and
-		 * transitivity propagates that through the stack, so crossing filaments fuse.
-		 * De-cluttering is planned to happen in CiliaQ.
-		 */
-						
-		// union-find "parent" array, indexed by GLOBAL line id (offset[z] + localId).
-		// +1 because global ids run 1..totalLines (id 0 is never used - 0 means background).
+		// union-find over GLOBAL line ids offset[z] + localId (1..totalLines; 0 is
+		// background)
 		int[] parent = new int[totalLines + 1];
-
-		/* Start every line as its own group: parent[i] = i means "i is its own root".
-		 * (So initially there are totalLines separate groups, none merged yet.) */
-		for (int i = 0; i <= totalLines; i++) {
+		for (int i = 0; i <= totalLines; i++)
 			parent[i] = i;
-		}
-
-		/* Compare each plane with the one directly above it (z and z+1).
-		 * "z + 1 < D" stops at the second-to-last plane, since the last has no plane above it. */
-		for (int z = 0; z + 1 < D; z++) {
-
-			/* Remember which (lineInZ, lineInZ+1) pairs we've already merged for THIS plane pair,
-			 * so we call union() once per distinct overlapping pair instead of once per shared pixel
-			 * (two lines can overlap over many pixels; we only need to merge them once). */
-			HashSet<Long> seenPair = new HashSet<Long>();
-
-			/* Walk every pixel position (same index i means same x,y in both planes,
-			 * because both label arrays are laid out as y*W + x with identical W,H). */
-			for (int i = 0; i < W * H; i++) {
-				// a = local line id at this pixel in plane z; b = local line id at same pixel in plane z+1.
-				int a = perPlane[z][i], b = perPlane[z + 1][i];
-
-				/* 0 means "no line here" (background). If either plane has no line at this pixel,
-				 * there is no overlap to record - skip. */
-				if (a == 0 || b == 0) continue;
-				
-				/* Pack the pair (a, b) into a single 64-bit value so it can be a HashSet key: 
-				 *   high 32 bits = a, low 32 bits = b.
-				 * "(long) a << 32" shifts a into the upper half; "b & 0xffffffffL" keeps b's lower 32 bits
-				 * (the mask stops a negative-looking int from sign-extending into the upper half). */
-				long key = (((long) a) << 32) | (b & 0xffffffffL);
-
-				// add(key) returns false if this exact (a,b) pair was already recorded - in that case we can skip.
-				if (!seenPair.add(key)) continue;
-
-				/* First time we see this overlapping pair: merge the two lines into one group.
-				 * offset[z] + a and offset[z+1] + b convert the local ids into GLOBAL ids before merging. */
-				union(parent, offset[z] + a, offset[z + 1] + b);
-			}
-		}
-
 		/*
-		 * Turn union-find groups into the final object labels.
-		 *
-		 * After the z-linking above, every line belongs to a group identified by its union-find ROOT
-		 * (an arbitrary global line id, not a tidy 1,2,3,...). Here we map each distinct root to a
-		 * consecutive label starting at 1, so the output image carries clean ids 1..N with 0 = background.
-		 *
-		 * IMPORTANT: we iterate over the voxels actually PAINTED in the image, not over the list of line
-		 * indices. rasterise() claims a voxel only if it is still free, so a line whose footprint is
-		 * entirely covered by an earlier line keeps an id but paints NO pixels. If we numbered from the line
-		 * list we would hand out labels that never appear in the image (and nObjects would overstate what is
-		 * really there). Numbering from painted voxels guarantees the contract: labels are consecutive, and
-		 * nObjects equals the number of distinct objects actually present in the output.
+		 * the rules' pairs, by global line id: hard (kink, branch, crossing) bind every
+		 * join, soft (parallel) too here - classic has no crossing pairing for them to
+		 * give way to. dropHairpins first releases parallel pairs that a nearby plane
+		 * traces as one fold.
 		 */
-		HashMap<Integer, Integer> idOf = new HashMap<Integer, Integer>();	// Maps a union-find root -> the final consecutive label assigned to that group.
-		
-		boolean wrapped = false; // set true if we run out of exactly-representable label values (see MAX_LABEL)
-		
-		// --- pass 1: discover every group that actually paints pixels, and assign it a label ---
-		for (int z = 0; z < D; z++) {
-			for (int i = 0; i < W * H; i++) {
-				int l = perPlane[z][i];			// this voxel's local (per-plane) line id; 0 = background
-				if (l == 0) continue;			// skip background voxels
-				int root = find(parent, offset[z] + l);	// the group this line belongs to (global id -> its root)
-				if (!idOf.containsKey(root)) {		// first voxel we've seen from this group
-					int next = idOf.size() + 1;	// labels are handed out in order of first appearance: 1, 2, 3, ...
-					if (next > MAX_LABEL) {		// ran past what float32 can hold as an exact integer:
-						wrapped = true;		// flag it so the caller can warn the user,
-						next = ((idOf.size()) % MAX_LABEL) + 1;	// and reuse a low label (duplicate ids - accepted, not fatal)
-					}
-					idOf.put(root, next);		// remember: this group -> this label
+		Map<Integer, Set<Integer>> hard = null, soft = null;
+		if (anyRule) {
+			rules.dropHairpins(linesZ, apartZ, rs.lineWidth);
+			hard = new HashMap<Integer, Set<Integer>>();
+			soft = new HashMap<Integer, Set<Integer>>();
+			for (int z = 0; z < D; z++)
+				for (int[] q : apartZ.get(z)) {
+					int x = offset[z] + q[0] + 1, y = offset[z] + q[1] + 1;
+					Map<Integer, Set<Integer>> m = q[2] == RidgeCleanup.PARALLEL ? soft : hard;
+					add(m, x, y);
+					add(m, y, x);
 				}
-			}
 		}
-		
-		// --- pass 2: write the assigned label into every painted voxel ---
-		int[][] out = new int[D][W * H];		// the final label image, [slice][y*W + x], 0 = background
-		for (int z = 0; z < D; z++) {
+		/*
+		 * z-link by pixel overlap, largest overlap first (pairs of lines in
+		 * neighbouring planes, counted over shared pixels; ties by id)
+		 */
+		HashMap<Long, Integer> overlapCount = new HashMap<Long, Integer>();
+		for (int z = 0; z + 1 < D; z++)
+			for (int i = 0; i < W * H; i++) {
+				int a = perPlane[z][i], b = perPlane[z + 1][i];
+				if (a == 0 || b == 0)
+					continue;
+				overlapCount.merge(((long) (offset[z] + a) << 32) | ((offset[z + 1] + b) & 0xffffffffL), 1,
+						Integer::sum);
+			}
+		List<Map.Entry<Long, Integer>> order = new ArrayList<Map.Entry<Long, Integer>>(overlapCount.entrySet());
+		order.sort((u, v) -> v.getValue().intValue() != u.getValue().intValue() ? v.getValue() - u.getValue()
+				: Long.compare(u.getKey(), v.getKey()));
+		for (Map.Entry<Long, Integer> e : order)
+			join(parent, hard, soft, (int) (e.getKey() >>> 32), (int) (e.getKey() & 0xffffffffL));
+
+		// step 6, last: short pieces next to a filament, joined or dropped
+		Set<Integer> dropped = shortPieces(parent, hard, soft, linesZ, offset, D, rs);
+
+		// minimum length on the object: distinct line positions in xy
+		Map<Integer, Set<Long>> xy = xyByObject(parent, linesZ, offset, D);
+		int[][] out = new int[D][W * H];
+		for (int z = 0; z < D; z++)
 			for (int i = 0; i < W * H; i++) {
 				int l = perPlane[z][i];
-				if (l == 0) continue;			// background stays 0
-				
-				// look up this voxel's group (root) and write its consecutive label
-				out[z][i] = idOf.get(find(parent, offset[z] + l)).intValue();
+				if (l == 0)
+					continue;
+				int r = find(parent, offset[z] + l);
+				if (xy.get(r).size() < rs.minLength || dropped.contains(r))
+					continue;
+				out[z][i] = r;
+			}
+		return out;
+	}
+
+	/** per object (root): its distinct line positions in xy (the minimum length counts them) */
+	static Map<Integer, Set<Long>> xyByObject(int[] parent, List<List<float[][]>> linesZ, int[] offset, int D) {
+		Map<Integer, Set<Long>> xy = new HashMap<Integer, Set<Long>>();
+		for (int z = 0; z < D; z++) {
+			List<float[][]> LS = linesZ.get(z);
+			for (int l = 0; l < LS.size(); l++) {
+				Set<Long> s = xy.computeIfAbsent(find(parent, offset[z] + l + 1), k -> new HashSet<Long>());
+				float[][] L = LS.get(l);
+				for (int i = 0; i < L[0].length; i++)
+					s.add(((long) Math.round(L[0][i]) << 32) | (Math.round(L[1][i]) & 0xffffffffL));
 			}
 		}
-		
-		// idOf.size() is the number of DISTINCT groups that painted at least one voxel = the true object count.
-		return new Result(out, idOf.size(), totalLines, W, H, D, wrapped);
+		return xy;
+	}
+
+	/**
+	 * Step 6 on the objects of classic (RidgeShortPieces), in xy only: classic paints every plane a line is seen in, so
+	 * the planes say nothing about how far an object extends in z. Joins override the pairs kept apart. Returns the dropped
+	 * objects.
+	 */
+	static Set<Integer> shortPieces(int[] p, Map<Integer, Set<Integer>> hard, Map<Integer, Set<Integer>> soft, List<List<float[][]>> linesZ,
+			int[] offset, int D, RidgeSettings rs) {
+		Set<Integer> dropped = new HashSet<Integer>();
+		final int mode = rs.shortPiecesMode();
+		if (mode == RidgeShortPieces.APART)
+			return dropped;
+		java.util.TreeMap<Integer, List<float[]>> obj = new java.util.TreeMap<Integer, List<float[]>>();
+		for (int z = 0; z < D; z++) {
+			List<float[][]> LS = linesZ.get(z);
+			for (int l = 0; l < LS.size(); l++) {
+				float[][] L = LS.get(l);
+				List<float[]> ps = obj.computeIfAbsent(find(p, offset[z] + l + 1), k -> new ArrayList<float[]>());
+				for (int i = 0; i < L[0].length; i++)
+					ps.add(new float[] { L[0][i], L[1][i], 0f });
+			}
+		}
+		Set<Integer> kept = new HashSet<Integer>(); // the objects the minimum length keeps: only these take pieces
+		for (Map.Entry<Integer, Set<Long>> e : xyByObject(p, linesZ, offset, D).entrySet())
+			if (e.getValue().size() >= rs.minLength)
+				kept.add(e.getKey());
+		for (Map.Entry<Integer, Integer> e : RidgeShortPieces.find(obj, kept, rs.lineWidth, 0).entrySet()) {
+			if (mode == RidgeShortPieces.DROP) {
+				dropped.add(e.getKey());
+				continue;
+			}
+			int r = find(p, e.getKey()), t = find(p, e.getValue());
+			if (r == t)
+				continue;
+			int n = Math.min(r, t), o = Math.max(r, t);
+			p[o] = n;
+			RidgeZ.mergeForb(hard, n, o);
+			RidgeZ.mergeForb(soft, n, o);
+		}
+		return dropped;
+	}
+
+	/** Steger on one plane, timed by the watchdog */
+	static Lines detectPlane(ImageProcessor ip, RidgeSettings rs, double minLength, OverlapOption overlap, SlowWatchdog watchdog) {
+		LineDetector det = new LineDetector().setLineWidth(rs.lineWidth);	// New V0.2.1: the resolver gets the user's width
+		watchdog.arm();						// start the clock for THIS plane
+		try {
+			return det.detectLines(ip, rs.sigma, rs.upperThreshold, rs.lowerThreshold, minLength, rs.maxLength, rs.darkLine,
+					rs.correctPosition, rs.estimateWidth, rs.extendLine, overlap);
+		} finally {
+			watchdog.disarm();				// plane finished (or threw) - stop the clock
+		}
+	}
+
+	/** Steger's minimum length per plane, in px: the user's minimum applies to the finished object (New V0.2.1). */
+	static final double MIN_PIECE = 2;
+
+	/** the safety cap on lines per plane (see LINE_CAP_DIVISOR) */
+	static void checkCap(int nLines, int W, int H, int z) {
+		int cap = Math.max(2000, (W * H) / LINE_CAP_DIVISOR);
+		if (nLines > cap) {
+			throw new IllegalStateException("ridge detection produced " + nLines
+					+ " lines on plane " + (z + 1) + ", above the safety cap of " + cap
+					+ " (one per " + LINE_CAP_DIVISOR + " pixels). The thresholds are too"
+					+ " permissive for this image - raise 'contrast sensitivity'.");
+		}
+	}
+
+	/**
+	 * Final labels: consecutive positive integers from 1, in order of the first painted voxel (scan order: plane, then
+	 * y*W + x), so labels never skip a value and nObjects is the number of objects present. Labels wrap at 2^24, above which
+	 * float32 can no longer hold consecutive integers exactly; a wrap is reported rather than silently producing duplicates.
+	 */
+	static Result numbered(int[][] perVoxel, int nLines, int W, int H, int D) {
+		HashMap<Integer, Integer> idOf = new HashMap<Integer, Integer>();
+		boolean wrapped = false;
+		int[][] out = new int[D][W * H];
+		for (int z = 0; z < D; z++) for (int i = 0; i < W * H; i++) {
+			int v = perVoxel[z][i]; if (v == 0) continue;
+			Integer id = idOf.get(v);
+			if (id == null) {
+				int next = idOf.size() + 1;
+				if (next > MAX_LABEL) { wrapped = true; next = ((idOf.size()) % MAX_LABEL) + 1; }
+				id = next; idOf.put(v, id);
+			}
+			out[z][i] = id;
+		}
+		return new Result(out, idOf.size(), nLines, W, H, D, wrapped);
+	}
+
+	/**
+	 * a join that honours the kept-apart pairs; the forbidden sets follow the
+	 * merged root
+	 */
+	private static void join(int[] p, Map<Integer, Set<Integer>> hard, Map<Integer, Set<Integer>> soft, int a, int b) {
+		int x = find(p, a), y = find(p, b);
+		if (x == y)
+			return;
+		if (hard != null) {
+			Set<Integer> f = hard.get(x);
+			if (f != null && f.contains(y))
+				return;
+		}
+		if (soft != null) {
+			Set<Integer> f = soft.get(x);
+			if (f != null && f.contains(y))
+				return;
+		}
+		int r = Math.min(x, y), o = Math.max(x, y);
+		p[o] = r;
+		RidgeZ.mergeForb(hard, r, o);
+		RidgeZ.mergeForb(soft, r, o);
+	}
+	
+	private static void add(Map<Integer, Set<Integer>> m, int x, int y) {
+		m.computeIfAbsent(x, k -> new HashSet<Integer>()).add(y);
 	}
 
 	/**
@@ -287,16 +424,16 @@ public class RidgeSegmenter {
 	 * footprint is entirely covered by earlier lines paints nothing - which is why object numbering later
 	 * counts PAINTED voxels, not line indices (see the renumbering step in detect()).
 	 *
-	 * @param l             the detected line, providing its centre points and (optionally) per-point widths
+	 * @param L             the line as rows {x, y, response} or, with estimated widths, {x, y, response, width left, width right}
+	 *                      (New V0.2.1: rows instead of the Line object, so a line the kink rule cut keeps its widths)
 	 * @param lab           the plane's label array [y*W + x] to paint into; 0 = background
 	 * @param W, H          plane dimensions, for bounds checking and indexing
 	 * @param id            the local (per-plane) label to write for this line
-	 * @param estimateWidth true to use the line's estimated width for the disc radius; false for a thin line
 	 */
-	private static void rasterise(Line l, int[] lab, int W, int H, int id, boolean estimateWidth) {
-		float[] xs = l.getXCoordinates(), ys = l.getYCoordinates();
-		float[] wl = estimateWidth ? l.getLineWidthL() : null;
-		float[] wr = estimateWidth ? l.getLineWidthR() : null;
+	private static void rasterise(float[][] L, int[] lab, int W, int H, int id) {
+		float[] xs = L[0], ys = L[1];
+		float[] wl = L.length > 4 ? L[3] : null;
+		float[] wr = L.length > 4 ? L[4] : null;
 		for (int i = 0; i < xs.length; i++) {
 			double halfWidth = (wl != null && wr != null && i < wl.length && i < wr.length)
 					? Math.max(0.5, (wl[i] + wr[i]) / 2.0) : 1.0;

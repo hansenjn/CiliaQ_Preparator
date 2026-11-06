@@ -14,7 +14,7 @@ package ciliaQ_Prep_jnh;
 * See the GNU General Public License for more details.
 *  
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: October 31W, 2026)
+* Date: September 29, 2019 (This Version: November 4, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -346,7 +346,7 @@ try {
 			Arrays.fill(chosenHighAlg,"Otsu");
 						
 			for(int i = 0; i < channelIDs.length; i++){
-				String task = "channel " + i + " with channel nr " + channelIDs [i];
+				String task = "channel " + (i+1) + " with channel nr " + channelIDs [i];
 				String alg = chosenAlgorithms [i];
 				try {
 					if("CANNY 3D".equals(alg)){
@@ -1735,11 +1735,11 @@ private boolean importSettings() {
 						IJ.log("C" + actualC + ": fraction f=" + (loc ? fs.fLocal : fs.fGlobal)
 								+ " tile=" + fs.tileSize + " bgP=" + fs.bgPercentile);
 					}else if(line.contains(RIDGE_DETECTION)) {
-						chosenAlgorithms [actualC] = RIDGE_DETECTION;
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
-						ridgeSettings [actualC] = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
-						java.util.HashMap<String,String> kv = readIndentedBlock(br);
-						ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = ridgeSettings [actualC];
+						chosenAlgorithms[actualC] = RIDGE_DETECTION;
+						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms[actualC]);
+						ridgeSettings[actualC] = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
+						java.util.HashMap<String, String> kv = readIndentedBlock(br);
+						ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = ridgeSettings[actualC];
 						rs.lineWidth = blockDouble(kv, "Expected filament width", rs.lineWidth);
 						rs.sensitivity = blockDouble(kv, "Contrast sensitivity", rs.sensitivity);
 						rs.minLength = blockDouble(kv, "Minimum filament length", rs.minLength);
@@ -1748,13 +1748,45 @@ private boolean importSettings() {
 								: parseNum(maxL, rs.maxLength);
 						rs.resolveCrossings = blockBoolean(kv, "Resolve crossings", rs.resolveCrossings);
 						rs.darkLine = blockBoolean(kv, "Dark line", rs.darkLine);
-						/*	These three are Steger detector switches that the dialog exposes. They were
-						 *	lost on every round trip until report() stopped combining them into one
-						 *	"a / b / c" line - see RidgeSettings.report(). */
+
+						/*
+						 * These three are Steger detector switches that the dialog exposes. They were
+						 * lost on every round trip until report() stopped combining them into one
+						 * "a / b / c" line - see RidgeSettings.report().
+						 */
 						rs.correctPosition = blockBoolean(kv, "Correct position", rs.correctPosition);
 						rs.estimateWidth = blockBoolean(kv, "Estimate width", rs.estimateWidth);
 						rs.extendLine = blockBoolean(kv, "Extend line", rs.extendLine);
+
+						/*
+						 * Z method and clean-up rules. Each label exactly as report() writes it (an
+						 * exact label wins in blockValue); a choice not in the list keeps the default.
+						 */
+						String zm = blockValue(kv, "Z method");
+						if (zm != null)
+							for (String m : ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.Z_METHODS)
+								if (m.equals(zm.trim()))
+									rs.zMethod = m;
+						rs.copyRule = blockBoolean(kv, "Copy rule", rs.copyRule);
+						rs.copyRatio = blockDouble(kv, "Copy brightness ratio", rs.copyRatio);
+						rs.kinkRule = blockBoolean(kv, "Kink rule", rs.kinkRule);
+						rs.kinkAngle = blockDouble(kv, "Kink angle (degrees)", rs.kinkAngle);
+						rs.branchRule = blockBoolean(kv, "Branch rule", rs.branchRule);
+						String sp = blockValue(kv, "Short pieces");
+						if (sp != null)
+							for (String k : ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_CHOICES)
+								if (k.equals(sp.trim()))
+									rs.shortPieces = k;
+						rs.crossingRule = blockBoolean(kv, "Crossing rule", rs.crossingRule);
+						rs.parallelRule = blockBoolean(kv, "Parallel rule", rs.parallelRule);
+						rs.turnRelease = blockBoolean(kv, "Turn release", rs.turnRelease);
+						rs.zProfileSmoothing = blockDouble(kv, "Z-profile smoothing (px, 0 = automatic)",
+								rs.zProfileSmoothing);
+						rs.turnAngle = blockDouble(kv, "Turn release angle (degrees)", rs.turnAngle);
+						rs.turnTangent = blockDouble(kv, "Turn release tangent (line widths)", rs.turnTangent);
+						rs.turnContinuity = blockDouble(kv, "Turn release continuity", rs.turnContinuity);
 						rs.advancedOverride = blockBoolean(kv, "Advanced values overridden by user", false);
+						
 						/*	The Steger values are only present when they were overridden or already
 						 *	derived; when derived they were written for a PREVIOUS image, so they must
 						 *	not be restored - deriveFrom will recompute them for the new one. */
@@ -1764,7 +1796,10 @@ private boolean importSettings() {
 							rs.lowerThreshold = blockDouble(kv, "Lower threshold", rs.lowerThreshold);
 						}
 						IJ.log("C" + actualC + ": ridge w=" + rs.lineWidth + " sens=" + rs.sensitivity
-								+ " minLen=" + rs.minLength + " override=" + rs.advancedOverride);
+								+ " minLen=" + rs.minLength + " override=" + rs.advancedOverride
+								+ " z=" + rs.zMethodToken() + " copy=" + rs.copyRule + " kink=" + rs.kinkRule
+								+ " branch=" + rs.branchRule + " shortPieces=" + rs.shortPiecesToken() + " crossing=" + rs.crossingRule
+								+ " parallel=" + rs.parallelRule + " turnRelease=" + rs.turnRelease);
 					}else if(line.contains("EXPANSION from seeds")) {
 						chosenAlgorithms [actualC] = EXPANSION_SEEDS;
 						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
@@ -2210,39 +2245,41 @@ private boolean enterSettings() {
 	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 	//-------------------------GenericDialog--------------------------------------
 	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
-		
-	GenericDialog gd = new GenericDialog(PLUGIN_NAME + " on " + System.getProperty("os.name") + " - set parameters");	
+	
 	//show Dialog-----------------------------------------------------------------
+	GenericDialog gd = new GenericDialog(PLUGIN_NAME + " on " + System.getProperty("os.name") + " - set parameters");	
+	gd.addHelp("https://github.com/hansenjn/CiliaQ#user-guide--manual");
+		
 	//.setInsets(top, left, bottom)
 	gd.setInsets(0,0,0);	gd.addMessage(PLUGIN_NAME + ", Version " + PLUGIN_VERSION + ", \u00a9 2019-2023 JN Hansen", SUPER_HEADING_FONT);
 	gd.setInsets(5,0,0);	gd.addMessage("Channel to be segmented (i.e. reconstruction channel for CiliaQ)", HEADING_FONT);	
-	gd.setInsets(0,10,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
-	gd.setInsets(0,10,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
-	gd.setInsets(0,10,0);	gd.addCheckbox("1. Remove speckles with median filter - radius (px)", medianFilter [0]);
+	gd.setInsets(0,0,0);	gd.addNumericField("Channel Nr (>= 1 & <= nr of channels)", channelIDs[0], 0);
+	gd.setInsets(0,0,0);	gd.addCheckbox("Include also an unsegmented copy of the channel", includeDuplicateChannel [0]);
+	gd.setInsets(0,0,0);	gd.addCheckbox("1. Remove speckles with median filter - radius (px)", medianFilter [0]);
 	gd.setInsets(-23,100,0);	gd.addNumericField("", medianRadius[0], 2);
-	gd.setInsets(0,10,0);	gd.addCheckbox("2. Smooth with Gaussian blur - radius", preBlur [0]);
+	gd.setInsets(0,0,0);	gd.addCheckbox("2. Smooth with Gaussian blur - radius", preBlur [0]);
 	gd.setInsets(-23,100,0);	gd.addNumericField("", preBlurRadius[0], 2);
-	gd.setInsets(0,10,0);	gd.addCheckbox("3. Subtract Background before segmentation - radius", subtractBackground [0]);
+	gd.setInsets(0,0,0);	gd.addCheckbox("3. Subtract Background before segmentation - radius", subtractBackground [0]);
 	gd.setInsets(-23,100,0);	gd.addNumericField("", subtractBGRadius[0], 2);
-	gd.setInsets(0,10,0);	gd.addCheckbox("4. Divide by Background before segmentation - radius", divideBackground [0]);
+	gd.setInsets(0,0,0);	gd.addCheckbox("4. Divide by Background before segmentation - radius", divideBackground [0]);
 	gd.setInsets(-23,100,0);	gd.addNumericField("", divideBGRadius[0], 2);
-	gd.setInsets(0,10,0);	gd.addCheckbox("5. Smooth with Gaussian blur - radius", additionalBlur [0]);
+	gd.setInsets(0,0,0);	gd.addCheckbox("5. Smooth with Gaussian blur - radius", additionalBlur [0]);
 	gd.setInsets(-23,100,0);	gd.addNumericField("", additionalBlurRadius[0], 2);
-	gd.setInsets(0,10,0);	gd.addChoice("6. Segmentation method", algorithm, chosenAlgorithms[0]);
+	gd.setInsets(0,0,0);	gd.addChoice("6. Segmentation method", algorithm, chosenAlgorithms[0]);
 	
-	gd.setInsets(0,0,0);	gd.addMessage("Most methods above open a second dialog for their own settings after"
-			+ " pressing OK. Only the plain threshold algorithms and 'CUSTOM threshold' do not.", INSTRUCTIONS_FONT);	
+	gd.setInsets(0,0,0);	gd.addMessage("Most methods open a second dialog for their own settings after"
+			+ " pressing OK (exceptions: plain threshold algorithms & 'CUSTOM threshold').", INSTRUCTIONS_FONT);	
 	gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
-	gd.setInsets(0,10,0);	gd.addChoice("Stack handling (not used by CANNY 3D, PHANSALKAR, RIDGE or SPOT): ", stackMethod, chosenStackMethods[0]);	
-	gd.setInsets(0,10,0);	gd.addCheckbox("Threshold every time step independently (not used by CANNY 3D, PHANSALKAR)", separateTimesteps [0]);		
+	gd.setInsets(0,0,0);	gd.addChoice("Stack handling (not used by CANNY, PHANSALKAR, RIDGE, SPOT): ", stackMethod, chosenStackMethods[0]);	
+	gd.setInsets(0,0,0);	gd.addCheckbox("Threshold every time step independently (not used by CANNY 3D, PHANSALKAR)", separateTimesteps [0]);		
 	
-	gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels:", 0, 0);
+	gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels (e.g., basal body channel):", 0, 0);
 	gd.setInsets(0,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment here and CiliaQ Prepartor will provide "
-			+ "more dialogs to select the corresponding segmentation settings)", INSTRUCTIONS_FONT);
+			+ "more dialogs to set up their settings)", INSTRUCTIONS_FONT);
 	
 	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HEADING_FONT);	
 	gd.setInsets(5,0,0);	gd.addChoice("Segmentation style: ", intensityVariant, intensityVariant [0]);
-	
+		
 	gd.showDialog();
 	//show Dialog-----------------------------------------------------------------
 
@@ -2459,6 +2496,22 @@ private boolean validateSettings(){
 				return false;
 			}
 		}
+		
+		// Classic z method cannot distinguish an upright (standing) cilium (short in x,y, tall in z)
+		// from a short piece, so short-piece removal can delete standing cilia. Only a risk for
+		// RIDGE_DETECTION, only when short pieces are joined/dropped (not "keep apart").
+		if(chosenAlgorithms [c].equals(RIDGE_DETECTION) && ridgeSettings [c] != null
+				&& ridgeSettings [c].zMethod.equals(ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.Z_CLASSIC)
+				&& !ridgeSettings [c].shortPieces.equals(ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_APART)){
+			warn("Channel " + channelIDs [c] + ": ridge detection combines the 'Classic' z method with"
+				+ "\nshort-piece handling '" + ridgeSettings [c].shortPieces + "'. Classic has no z"
+				+ "\ninformation, so an upright (standing) cilium - short in x,y but tall in z - can be"
+				+ "\nmistaken for a short piece and " 
+				+ (ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_DROP.equals(ridgeSettings [c].shortPieces)
+						? "dropped" : "merged into a neighbour") + "."
+				+ "\nIf you have standing cilia, use the 'in-focus' or '3D' z method, or set short pieces"
+				+ "\nto 'keep apart (you can also use CiliaQ to remove short pieces via the min size filter)'.");
+		}
 	}
 
 	if(chosenImageStyle.equals(intensityVariant[1])){
@@ -2603,34 +2656,79 @@ private boolean readSettingsFromMacroString(String options){
 			customHighThr [c] = macroDouble(options, p + "hyst-high-thr", 0.0);
 		}else if(chosenAlgorithms [c].equals(RIDGE_DETECTION)){
 			/*
-			 * The simple keys are always read. The ADVANCED keys are honoured only when actually
-			 * present: if any of them is given, advancedOverride is set so deriveFrom() will not
-			 * recompute over the top of it. Without that, a macro could not pin sigma/thresholds at all.
+			 * The simple keys are always read. The ADVANCED keys are honoured only when
+			 * actually present: if any of them is given, advancedOverride is set so
+			 * deriveFrom() will not recompute over the top of it. Without that, a macro
+			 * could not pin sigma/thresholds at all.
 			 */
-			ridgeSettings [c] = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
-			ridgeSettings [c].lineWidth = macroDouble(options, p + "ridge-width", 2.0);
-			ridgeSettings [c].sensitivity = macroDouble(options, p + "ridge-sensitivity", 0.6);
-			ridgeSettings [c].minLength = macroDouble(options, p + "ridge-min-length", 10.0);
-			ridgeSettings [c].maxLength = macroDouble(options, p + "ridge-max-length", 0.0);
-			/*	macroFlag, NOT macroValue. macroValue looks for "key=" and so returns null for a BARE
-			 *	flag, which made "macroValue(...) == null" unconditionally true - ridge-no-crossings was
-			 *	written by the recorder and then silently ignored on the way back in. */
-			ridgeSettings [c].resolveCrossings = !macroFlag(options, p + "ridge-no-crossings");
-			ridgeSettings [c].darkLine = macroFlag(options, p + "ridge-dark");
-			/*	Negative flags, because these three default to TRUE - same convention as
-			 *	ridge-no-crossings. Without them a GUI user could switch a detector option off and
-			 *	neither the recorded macro nor the optimizer could reproduce it. */
-			ridgeSettings [c].correctPosition = !macroFlag(options, p + "ridge-no-correct-position");
-			ridgeSettings [c].estimateWidth = !macroFlag(options, p + "ridge-no-estimate-width");
-			ridgeSettings [c].extendLine = !macroFlag(options, p + "ridge-no-extend-line");
-			if(macroValue(options, p + "ridge-sigma") != null
-					|| macroValue(options, p + "ridge-upper") != null
-					|| macroValue(options, p + "ridge-lower") != null){
-				ridgeSettings [c].sigma = macroDouble(options, p + "ridge-sigma",
-						ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.sigmaForWidth(ridgeSettings [c].lineWidth));
-				ridgeSettings [c].upperThreshold = macroDouble(options, p + "ridge-upper", 0.0);
-				ridgeSettings [c].lowerThreshold = macroDouble(options, p + "ridge-lower", 0.0);
-				ridgeSettings [c].advancedOverride = true;
+			ridgeSettings[c] = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
+			ridgeSettings[c].lineWidth = macroDouble(options, p + "ridge-width", ridgeSettings[c].lineWidth);
+			ridgeSettings[c].sensitivity = macroDouble(options, p + "ridge-sensitivity", ridgeSettings[c].sensitivity);
+			ridgeSettings[c].minLength = macroDouble(options, p + "ridge-min-length", ridgeSettings[c].minLength);
+			ridgeSettings[c].maxLength = macroDouble(options, p + "ridge-max-length", 0.0);
+			
+			/*
+			 * macroFlag, NOT macroValue. macroValue looks for "key=" and so returns null
+			 * for a BARE flag, which made "macroValue(...) == null" unconditionally true -
+			 * ridge-no-crossings was written by the recorder and then silently ignored on
+			 * the way back in.
+			 */
+			ridgeSettings[c].resolveCrossings = !macroFlag(options, p + "ridge-no-crossings");
+			ridgeSettings[c].darkLine = macroFlag(options, p + "ridge-dark");
+			
+			/*
+			 * Negative flags, because these three default to TRUE - same convention as
+			 * ridge-no-crossings. Without them a GUI user could switch a detector option
+			 * off and neither the recorded macro nor the optimizer could reproduce it.
+			 */
+			ridgeSettings[c].correctPosition = !macroFlag(options, p + "ridge-no-correct-position");
+			ridgeSettings[c].estimateWidth = !macroFlag(options, p + "ridge-no-estimate-width");
+			ridgeSettings[c].extendLine = !macroFlag(options, p + "ridge-no-extend-line");
+			
+			/*
+			 * Z method and clean-up rules. Flags for the switches (negative
+			 * ones for those that default to on, as above), values for the numbers. ridge-z
+			 * takes a token: classic, in-focus or 3D.
+			 */
+			String zTok = macroValue(options, p + "ridge-z");
+			if (zTok != null) {
+				String zm = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.zMethodFromToken(zTok);
+				if (zm != null)
+					ridgeSettings[c].zMethod = zm;
+				else
+					IJ.log(PLUGIN_NAME + ": unknown " + p + "ridge-z '" + zTok + "' (classic, in-focus or 3D), keeping "
+							+ ridgeSettings[c].zMethodToken());
+			}
+			ridgeSettings[c].copyRule = macroFlag(options, p + "ridge-copy-rule");
+			ridgeSettings[c].copyRatio = macroDouble(options, p + "ridge-copy-ratio", ridgeSettings[c].copyRatio);
+			ridgeSettings[c].kinkRule = macroFlag(options, p + "ridge-kink-rule");
+			ridgeSettings[c].kinkAngle = macroDouble(options, p + "ridge-kink-angle", ridgeSettings[c].kinkAngle);
+			ridgeSettings[c].branchRule = !macroFlag(options, p + "ridge-no-branch-rule");
+			String spTok = macroValue(options, p + "ridge-short-pieces"); // join, drop or apart
+			if (spTok != null) {
+				String sp = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.shortPiecesFromToken(spTok);
+				if (sp != null)
+					ridgeSettings[c].shortPieces = sp;
+				else
+					IJ.log(PLUGIN_NAME + ": unknown " + p + "ridge-short-pieces '" + spTok
+							+ "' (join, drop or apart), keeping " + ridgeSettings[c].shortPiecesToken());
+			}
+			ridgeSettings[c].crossingRule = !macroFlag(options, p + "ridge-no-crossing-rule");
+			ridgeSettings[c].parallelRule = macroFlag(options, p + "ridge-parallel-rule");
+			ridgeSettings[c].turnRelease = !macroFlag(options, p + "ridge-no-turn-release");
+			ridgeSettings[c].zProfileSmoothing = macroDouble(options, p + "ridge-z-smoothing",
+					ridgeSettings[c].zProfileSmoothing);
+			ridgeSettings[c].turnAngle = macroDouble(options, p + "ridge-turn-angle", ridgeSettings[c].turnAngle);
+			ridgeSettings[c].turnTangent = macroDouble(options, p + "ridge-turn-tangent", ridgeSettings[c].turnTangent);
+			ridgeSettings[c].turnContinuity = macroDouble(options, p + "ridge-turn-continuity",
+					ridgeSettings[c].turnContinuity);
+			if (macroValue(options, p + "ridge-sigma") != null || macroValue(options, p + "ridge-upper") != null
+					|| macroValue(options, p + "ridge-lower") != null) {
+				ridgeSettings[c].sigma = macroDouble(options, p + "ridge-sigma",
+						ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.sigmaForWidth(ridgeSettings[c].lineWidth));
+				ridgeSettings[c].upperThreshold = macroDouble(options, p + "ridge-upper", 0.0);
+				ridgeSettings[c].lowerThreshold = macroDouble(options, p + "ridge-lower", 0.0);
+				ridgeSettings[c].advancedOverride = true;
 			}
 		}else if(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c])){
 			phansalkarSettings [c] = ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.initDefault();
@@ -2670,8 +2768,8 @@ private boolean readSettingsFromMacroString(String options){
 			expansionSettings [c].customSeedThr = macroDouble(options, p + "exp-seed-thr", 0.0);
 			expansionSettings [c].minPieceSize = (int) Math.round(
 					macroDouble(options, p + "exp-min-piece", 200.0));
-			expansionSettings [c].ridgeWidth = macroDouble(options, p + "exp-ridge-width", 2.0);
-			expansionSettings [c].ridgeSensitivity = macroDouble(options, p + "exp-ridge-sensitivity", 0.6);
+			expansionSettings [c].ridgeWidth = macroDouble(options, p + "exp-ridge-width", expansionSettings [c].ridgeWidth);
+			expansionSettings [c].ridgeSensitivity = macroDouble(options, p + "exp-ridge-sensitivity", expansionSettings [c].ridgeSensitivity);
 			expansionSettings [c].spotDiameter = macroDouble(options, p + "exp-spot-diameter", 2.0);
 			expansionSettings [c].spotSensitivity = macroDouble(options, p + "exp-spot-sensitivity", 0.5);
 		}else if(chosenAlgorithms [c].equals(SPOT_DETECTION)){
@@ -2722,45 +2820,101 @@ private String createRecordString(){
 	s += "segmentation-style=[" + chosenImageStyle + "] ";
 	s += "channels=" + channelIDs.length + " ";
 	for(int c = 0; c < channelIDs.length; c++){
-		String p = "c" + (c+1) + "-";
-		s += p + "nr=" + df0.format(channelIDs [c]) + " ";
-		if(includeDuplicateChannel [c])	s += p + "duplicate ";
-		if(medianFilter [c])			s += p + "median=" + df3.format(medianRadius [c]) + " ";
-		if(preBlur [c])					s += p + "preblur=" + df3.format(preBlurRadius [c]) + " ";
-		if(subtractBackground [c])		s += p + "subtract-bg=" + df3.format(subtractBGRadius [c]) + " ";
-		if(divideBackground [c])		s += p + "divide-bg=" + df3.format(divideBGRadius [c]) + " ";
-		if(additionalBlur [c])			s += p + "blur=" + df3.format(additionalBlurRadius [c]) + " ";
-		s += p + "method=[" + chosenAlgorithms [c] + "] ";
-		if(chosenAlgorithms [c].equals("CUSTOM threshold")){
-			s += p + "custom-thr=" + df6.format(customThr [c]) + " ";
-		}else if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
-			s += p + "hyst-low=[" + chosenLowAlg [c] + "] ";
-			s += p + "hyst-high=[" + chosenHighAlg [c] + "] ";
-			if(chosenLowAlg [c].equals(hystAlgorithms[0]))	s += p + "hyst-low-thr=" + df6.format(customLowThr [c]) + " ";
-			if(chosenHighAlg [c].equals(hystAlgorithms[0]))	s += p + "hyst-high-thr=" + df6.format(customHighThr [c]) + " ";
+		String p = "c" + (c + 1) + "-";
+		
+		s += p + "nr=" + df0.format(channelIDs[c]) + " ";
+		
+		if (includeDuplicateChannel[c])
+			s += p + "duplicate ";
+		if (medianFilter[c])
+			s += p + "median=" + df3.format(medianRadius[c]) + " ";
+		if (preBlur[c])
+			s += p + "preblur=" + df3.format(preBlurRadius[c]) + " ";
+		if (subtractBackground[c])
+			s += p + "subtract-bg=" + df3.format(subtractBGRadius[c]) + " ";
+		if (divideBackground[c])
+			s += p + "divide-bg=" + df3.format(divideBGRadius[c]) + " ";
+		if (additionalBlur[c])
+			s += p + "blur=" + df3.format(additionalBlurRadius[c]) + " ";
+		
+		s += p + "method=[" + chosenAlgorithms[c] + "] ";
+		if (chosenAlgorithms[c].equals("CUSTOM threshold")) {
+			s += p + "custom-thr=" + df6.format(customThr[c]) + " ";
+		} else if (chosenAlgorithms[c].equals("HYSTERESIS threshold")) {
+			s += p + "hyst-low=[" + chosenLowAlg[c] + "] ";
+			s += p + "hyst-high=[" + chosenHighAlg[c] + "] ";
+			if (chosenLowAlg[c].equals(hystAlgorithms[0]))
+				s += p + "hyst-low-thr=" + df6.format(customLowThr[c]) + " ";
+			if (chosenHighAlg[c].equals(hystAlgorithms[0]))
+				s += p + "hyst-high-thr=" + df6.format(customHighThr[c]) + " ";
 		}else if(chosenAlgorithms [c].equals(RIDGE_DETECTION)){
-			s += p + "ridge-width=" + df3.format(ridgeSettings [c].lineWidth) + " ";
-			s += p + "ridge-sensitivity=" + df3.format(ridgeSettings [c].sensitivity) + " ";
-			s += p + "ridge-min-length=" + df3.format(ridgeSettings [c].minLength) + " ";
-			if(ridgeSettings [c].maxLength > 0)		s += p + "ridge-max-length=" + df3.format(ridgeSettings [c].maxLength) + " ";
-			if(!ridgeSettings [c].resolveCrossings)	s += p + "ridge-no-crossings ";
-			if(ridgeSettings [c].darkLine)			s += p + "ridge-dark ";
-			if(!ridgeSettings [c].correctPosition)	s += p + "ridge-no-correct-position ";
-			if(!ridgeSettings [c].estimateWidth)	s += p + "ridge-no-estimate-width ";
-			if(!ridgeSettings [c].extendLine)		s += p + "ridge-no-extend-line ";
-			/* Record the advanced values only when the user overrode them, so a recorded macro
-			 * reproduces the run exactly without pinning values that should stay derived. */
-			if(ridgeSettings [c].advancedOverride){
-				s += p + "ridge-sigma=" + df6.format(ridgeSettings [c].sigma) + " ";
-				s += p + "ridge-upper=" + df6.format(ridgeSettings [c].upperThreshold) + " ";
-				s += p + "ridge-lower=" + df6.format(ridgeSettings [c].lowerThreshold) + " ";
+			s += p + "ridge-width=" + df3.format(ridgeSettings[c].lineWidth) + " ";
+			s += p + "ridge-sensitivity=" + df3.format(ridgeSettings[c].sensitivity) + " ";
+			s += p + "ridge-min-length=" + df3.format(ridgeSettings[c].minLength) + " ";
+			if (ridgeSettings[c].maxLength > 0)
+				s += p + "ridge-max-length=" + df3.format(ridgeSettings[c].maxLength) + " ";
+			if (!ridgeSettings[c].resolveCrossings)
+				s += p + "ridge-no-crossings ";
+			if (ridgeSettings[c].darkLine)
+				s += p + "ridge-dark ";
+			if (!ridgeSettings[c].correctPosition)
+				s += p + "ridge-no-correct-position ";
+			if (!ridgeSettings[c].estimateWidth)
+				s += p + "ridge-no-estimate-width ";
+			if (!ridgeSettings[c].extendLine)
+				s += p + "ridge-no-extend-line ";
+
+			/*
+			 * Z method (always), clean-up switches when they differ from the default,
+			 * numbers when they differ from a fresh default object (so the defaults live in
+			 * RidgeSettings only).
+			 */
+			ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rd = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings
+					.initDefault();
+			s += p + "ridge-z=" + ridgeSettings[c].zMethodToken() + " ";
+			if (ridgeSettings[c].copyRule)
+				s += p + "ridge-copy-rule ";
+			if (ridgeSettings[c].copyRatio != rd.copyRatio)
+				s += p + "ridge-copy-ratio=" + df3.format(ridgeSettings[c].copyRatio) + " ";
+			if (ridgeSettings[c].kinkRule)
+				s += p + "ridge-kink-rule ";
+			if (ridgeSettings[c].kinkAngle != rd.kinkAngle)
+				s += p + "ridge-kink-angle=" + df3.format(ridgeSettings[c].kinkAngle) + " ";
+			if (!ridgeSettings[c].branchRule)
+				s += p + "ridge-no-branch-rule ";
+			if (!ridgeSettings[c].shortPieces.equals(rd.shortPieces))
+				s += p + "ridge-short-pieces=" + ridgeSettings[c].shortPiecesToken() + " ";
+			if (!ridgeSettings[c].crossingRule)
+				s += p + "ridge-no-crossing-rule ";
+			if (ridgeSettings[c].parallelRule)
+				s += p + "ridge-parallel-rule ";
+			if (!ridgeSettings[c].turnRelease)
+				s += p + "ridge-no-turn-release ";
+			if (ridgeSettings[c].zProfileSmoothing != rd.zProfileSmoothing)
+				s += p + "ridge-z-smoothing=" + df3.format(ridgeSettings[c].zProfileSmoothing) + " ";
+			if (ridgeSettings[c].turnAngle != rd.turnAngle)
+				s += p + "ridge-turn-angle=" + df3.format(ridgeSettings[c].turnAngle) + " ";
+			if (ridgeSettings[c].turnTangent != rd.turnTangent)
+				s += p + "ridge-turn-tangent=" + df3.format(ridgeSettings[c].turnTangent) + " ";
+			if (ridgeSettings[c].turnContinuity != rd.turnContinuity)
+				s += p + "ridge-turn-continuity=" + df3.format(ridgeSettings[c].turnContinuity) + " ";
+
+			/*
+			 * Record the advanced values only when the user overrode them, so a recorded
+			 * macro reproduces the run exactly without pinning values that should stay
+			 * derived.
+			 */
+			if (ridgeSettings[c].advancedOverride) {
+				s += p + "ridge-sigma=" + df6.format(ridgeSettings[c].sigma) + " ";
+				s += p + "ridge-upper=" + df6.format(ridgeSettings[c].upperThreshold) + " ";
+				s += p + "ridge-lower=" + df6.format(ridgeSettings[c].lowerThreshold) + " ";
 			}
 		}else if(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c])){
-			s += p + "phansalkar-radius=" + df3.format(phansalkarSettings [c].radius) + " ";
-			s += p + "phansalkar-k=" + df6.format(phansalkarSettings [c].k) + " ";
-			s += p + "phansalkar-r=" + df6.format(phansalkarSettings [c].r) + " ";
-			s += p + "phansalkar-p=" + df6.format(phansalkarSettings [c].p) + " ";
-			s += p + "phansalkar-q=" + df6.format(phansalkarSettings [c].q) + " ";
+			s += p + "phansalkar-radius=" + df3.format(phansalkarSettings[c].radius) + " ";
+			s += p + "phansalkar-k=" + df6.format(phansalkarSettings[c].k) + " ";
+			s += p + "phansalkar-r=" + df6.format(phansalkarSettings[c].r) + " ";
+			s += p + "phansalkar-p=" + df6.format(phansalkarSettings[c].p) + " ";
+			s += p + "phansalkar-q=" + df6.format(phansalkarSettings[c].q) + " ";
 		}else if(ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(
 				chosenAlgorithms [c])){
 			boolean loc = ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.LOCAL.equals(

@@ -8,12 +8,12 @@
  * it under the terms of the GNU General Public License as
  * published by the Free Software Foundation, either version 2 of the
  * License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public
  * License along with this program.  If not, see
  * <http://www.gnu.org/licenses/gpl-2.0.html>.
@@ -27,14 +27,16 @@ import java.util.Arrays;
 
 //import java.util.HashMap;
 //import java.util.HashSet;
-// CiliaQ-MOD: every HashSet/HashMap in this class was changed to LinkedHashSet/LinkedHashMap.
-// Line and Junction do NOT override hashCode(), so HashSet<Line>/HashSet<Junction> and
-// HashMap<Line,...> iterate in identity-hash order, which varies between JVM runs. This resolver
-// builds the output line set and order by iterating these collections (notably finalLines in
-// buildResolvedList), so identity-hash ordering made the detected lines non-reproducible on
-// identical input. LinkedHashSet/LinkedHashMap preserve insertion order (driven by deterministic
-// loops over junctions/lines), restoring reproducibility. Only the collection TYPE changed;
-// semantics (contains/add/get) are identical.
+// CiliaQ-MOD: every HashSet/HashMap in this class that is ITERATED is a LinkedHashSet/LinkedHashMap.
+// Line and Junction do NOT override hashCode(), so iterating a HashSet<Line> or HashMap<Line,...>
+// follows identity-hash order, which varies between JVM runs - that made the original's detected
+// lines non-reproducible on identical input. Insertion order is driven by deterministic loops over
+// lines and junctions. The two plain HashSets left (jPts, visited in resolveByJunctionClusters) are
+// only used for contains/add and never iterated.
+//
+// CiliaQ-MOD (modification 9): the merge step was rebuilt (resolve -> resolveByJunctionClusters). The
+// original findOverlap, buildIntersectionMaps, both buildMergeList, buildResolvedList and fillArray,
+// and the helpers only they used, were removed. See README.md, modification 9.
 
 
 import java.util.List;
@@ -44,17 +46,41 @@ import java.util.Set;
 import ciliaQ_Prep_jnh.ij_ridge_detector_steger.LinesUtil.contour_class;
 import ij.IJ;
 
-// TODO: Auto-generated Javadoc
 /**
  * Resolve overlap between lines by selecting the fragment with the closest
  * matching slope (which is really just trying to preserve straightness -
  * implying that a straight passover is more likely than two overlapping turns).
  *
+ * CiliaQ-MOD (modification 9): same principle, rebuilt merge step - see resolveByJunctionClusters.
+ *
  * @author Mark Hiner (hinerm@gmail.com)
+ * @author Jan Niklas Hansen (for CiliaQ-MOD modification 9)
  */
 public class SlopeOverlapResolver extends AbstractOverlapResolver {
 
-	// TODO add configuration for these
+	/** CiliaQ-MOD (modification 9): nominal full line width in pixels, from the detection sigma; used for the overlap
+	 *  limit when the lines carry no width (Estimate width off). <= 0 = unknown. */
+	private final float nominalWidth;
+
+	public SlopeOverlapResolver() { this(0); }
+
+	/** CiliaQ-MOD (modification 9): sigma of the detection. Inverts the width -> sigma relation the CiliaQ
+	 *  Preparator and the Ridge Detection plugin use, sigma = w / (2 sqrt 3) + 0.5. */
+	public SlopeOverlapResolver(final double sigma) {
+		this.nominalWidth = sigma > 0.5 ? (float) Math.max(1.0, 2.0 * Math.sqrt(3.0) * (sigma - 0.5)) : 0f;
+	}
+
+	/** CiliaQ-MOD (modification 10): a resolver for a known nominal full line width in pixels (the user's width). */
+	public static SlopeOverlapResolver forWidth(final double width) {
+		return new SlopeOverlapResolver((float) width);
+	}
+
+	private SlopeOverlapResolver(final float width) {
+		this.nominalWidth = width > 0 ? width : 0f;
+	}
+
+	// TODO: make these constants configurable (e.g. via plugin parameters)
+	
 	/** The Constant SIGMA. */
 	// Sigma for deciding if two floats are "close enough"
 	private static final float SIGMA = 2.0f;
@@ -73,530 +99,387 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 
 	/*
 	 * (non-Javadoc)
-	 * 
+	 *
 	 * @see
 	 * de.biomedical_imaging.ij.steger.OverlapResolver#resolve(de.biomedical_imaging
 	 * .ij.steger.Lines, de.biomedical_imaging.ij.steger.Junctions, boolean)
 	 */
 	@Override
 	public Lines resolve(final Lines originalLines, final Junctions junctions, final boolean verbose) {
-		if (verbose)
-			IJ.log("### Overlap detection using Slope heuristic");
-
-		final Set<Line> enclosedLines = new java.util.LinkedHashSet<Line>();	// CILIAQ-MOD to introduce determinability
-		final List<List<Line>> nWayIntersections = new ArrayList<List<Line>>();
-		findOverlap(enclosedLines, nWayIntersections, junctions, verbose);
-
-		final Map<Line, List<Line>> startIntersections = new java.util.LinkedHashMap<Line, List<Line>>();	// CILIAQ-MOD to introduce determinability
-		final Map<Line, List<Line>> endIntersections = new java.util.LinkedHashMap<Line, List<Line>>();	// CILIAQ-MOD to introduce determinability
-
-		buildIntersectionMaps(originalLines, enclosedLines, startIntersections, endIntersections, verbose);
-
-		final List<List<Line>> lineMerges = new ArrayList<List<Line>>();
-
-		// find enclosed merges
-		buildMergeList(lineMerges, enclosedLines, startIntersections, endIntersections, verbose);
-
-		// find n-way intersections
-		buildMergeList(lineMerges, nWayIntersections, verbose);
-
-		// perform the actual merges. This will also populate the lineMap
-		// with mappings from original to merged lines.
-		final Map<Line, Line> lineMap = new java.util.LinkedHashMap<Line, Line>();	// CILIAQ-MOD to introduce determinability
-		final Lines resolvedLines = buildResolvedList(originalLines, lineMerges, lineMap, verbose);
-
-		// use lineMap to update references in original junction points
-		// the updatedJunctions list will be populated so we can further process
-		// any updated junctions.
+		if (verbose) IJ.log("### Overlap detection using Slope heuristic (CiliaQ-MOD: junction clusters)");
+		final Map<Line, Line> lineMap = new java.util.LinkedHashMap<Line, Line>();
+		final Lines resolvedLines = resolveByJunctionClusters(originalLines, junctions, lineMap);
 		final Set<Junction> updatedJunctions = updateJunctions(junctions, lineMap);
-
-		// Remove any Junctions that are no longer valid
 		pruneJunctions(junctions, updatedJunctions);
-
-		// update the intersection points of each surviving Junction in
-		// UpdatedJunctions..
 		updateContourClasses(updatedJunctions);
-
 		return resolvedLines;
 	}
 
-	/**
-	 * Step 1: find enclosed lines (lines with a junction at both start and end
-	 * point).
+	/** CiliaQ-MOD (modification 9): an overlap piece at a crossing is at most this many line widths long. Two
+	 *  lines of width w crossing at angle a overlap over about w / sin(a/2): 1.4 w at 90 deg, 2.6 w at 45,
+	 *  3.9 w at 30. Shallower crossings are not traced through. */
+	private static final float OVERLAP_WIDTHS = 4f;
+
+	/** CiliaQ-MOD (modification 9): a joint may bend by at most this angle (degrees); more means two different
+	 *  filaments (a U-turn is 180, a T's side branch 90). Rather two pieces than one wrong merge. */
+	private static final double MAX_BEND_DEG = 60;
+
+	/*
+	 * CiliaQ-MOD (modification 9): merge lines through junctions, rebuilt around junction CLUSTERS.
 	 *
-	 * @param enclosed
-	 *            the enclosed
-	 * @param nWay
-	 *            the n way
-	 * @param junctions
-	 *            the junctions
-	 * @param verbose
-	 *            the verbose
+	 * The original treated every line with a junction at both ends as an "area of overlap" and paired
+	 * its start and end neighbours straight through it - right for the few-pixel piece shared by two
+	 * crossing filaments, wrong for a long line: for one plain ridge with stubs at both tips it built
+	 * stub-ridge-stub paths (three copies of the ridge), and in a tangle it routed one filament along a
+	 * second to a third. Its n-way grouping then chained lines transitively, which only held because
+	 * those long lines were filtered out first. And the merges from both builders were emitted
+	 * independently, so a line used twice came out twice.
+	 *
+	 * Here: (1) line ends lying on the same junction form a cluster; (2) a line joining two clusters and
+	 * at most OVERLAP_WIDTHS line widths long is the overlap piece of a crossing - it may be shared by the
+	 * filaments that cross through it; (3) joints are proposed between line ends of one cluster, and
+	 * through an overlap piece between its two clusters, scored with the straightCalc measure the
+	 * original used, over the path the joint builds; (4) joints are accepted straightest first, one
+	 * partner per line end, no cycles, at most two filaments through one overlap piece, and only if the
+	 * path bends by at most MAX_BEND_DEG; (5) accepted joints are walked into chains. Every line other
+	 * than an overlap piece ends up in exactly one output line.
 	 */
-	private void findOverlap(final Set<Line> enclosed, final List<List<Line>> nWay, final Junctions junctions,
-			final boolean verbose) {
-		// Remember if a Junction is located at the start or end point of a Line
-		Map<Line, Junction> startMatches = new java.util.LinkedHashMap<Line, Junction>();	//CIILIAQ-MOD to introduce determinability
-		Map<Line, Junction> endMatches = new java.util.LinkedHashMap<Line, Junction>();	//CIILIAQ-MOD to introduce determinability
+	private Lines resolveByJunctionClusters(final Lines lines, final Junctions junctions, final Map<Line, Line> lineMap) {
+		// --- 1. junction ends, and their clusters
 		
-		// These enclosed lines will be treated as areas of overlap
+		//	1a. Collect all junction coordinates into a lookup set.
+		//		Key = the two float coords encoded as exact int bits ("x,y"), so comparison is bit-exact
+		//		(avoids float == float rounding issues).
+		
+		final Set<String> jPts = new java.util.HashSet<String>();
 		for (final Junction j : junctions) {
-			// check if this junction sits on the start or end of either of its lines
-			if (matchesStart(j, j.getLine1()))
-				startMatches.put(j.getLine1(), j);
-			if (matchesEnd(j, j.getLine1()))
-				endMatches.put(j.getLine1(), j);
-
-			if (matchesStart(j, j.getLine2()))
-				startMatches.put(j.getLine2(), j);
-			if (matchesEnd(j, j.getLine2()))
-				endMatches.put(j.getLine2(), j);
+			jPts.add(Float.floatToIntBits(j.getX()) + "," + Float.floatToIntBits(j.getY()));
 		}
-
-		if (verbose) {
-			for (final Line l : startMatches.keySet()) {
-				IJ.log("Found line " + l.getID() + " intersects with junction " + startMatches.get(l)
-						+ " at line start");
-			}
-			for (final Line l : endMatches.keySet()) {
-				IJ.log("Found line " + l.getID() + " intersects with junction " + endMatches.get(l) + " at line end");
+		
+		//	1b. Find every LINE END that sits exactly on a junction.
+		//		For each line we check both ends (side 0 = first point, side 1 = last point).
+		//		eLine[i] + eSide[i] together identify one such "line end".
+		final List<Line> eLine = new ArrayList<Line>();
+		final List<Integer> eSide = new ArrayList<Integer>();
+		for (final Line l : lines) for (int side = 0; side < 2; side++) {
+			final float[] p = getPoint(l, side == 0 ? 0 : l.getNumber() - 1);
+			if (jPts.contains(Float.floatToIntBits(p[0]) + "," + Float.floatToIntBits(p[1]))) { eLine.add(l); eSide.add(side); }
+		}
+		
+		// number of junction-touching line ends
+		final int nE = eLine.size();
+		
+		//	1c. Union-find (disjoint set) over those line ends.
+		//		cl[i] points to another end in the same cluster; following cl[] until cl[r] == r
+		//		gives the cluster's representative ("root"). Two ends that lie at (nearly) the same
+		//		point get merged into one cluster.
+		final int[] cl = new int[nE];
+		for (int i = 0; i < nE; i++) cl[i] = i;   // start: every end is its own cluster
+		
+		// Compare every pair of ends; if they coincide (within SIGMA), union their clusters.
+		for (int i = 0; i < nE; i++) for (int k = i + 1; k < nE; k++) {
+			if (eLine.get(i) == eLine.get(k)) continue;   // don't merge a line with itself
+			
+			if (intersects(endPoint(eLine.get(i), eSide.get(i)), endPoint(eLine.get(k), eSide.get(k)), SIGMA)) {
+				int a = i, b = k;
+				
+				// find root of i
+				while (cl[a] != a) a = cl[a];
+				
+				// find root of k
+				while (cl[b] != b) b = cl[b];
+				
+				// merge: point the larger root at the smaller (keeps a stable representative)
+				if (a != b) cl[Math.max(a, b)] = Math.min(a, b);
 			}
 		}
+		
+		//	1d. Materialise the clusters.
+		//		clusters:   root -> list of end-indices belonging to that cluster.
+		//		clusterOf:  line -> [cluster of its start end, cluster of its end end]; -1 = that end
+		//					is not on any junction.
+		final Map<Integer, List<Integer>> clusters = new java.util.LinkedHashMap<Integer, List<Integer>>();
+		final Map<Line, int[]> clusterOf = new java.util.LinkedHashMap<Line, int[]>();	// [start cluster, end cluster], -1 = none
+		for (int i = 0; i < nE; i++) {
+			// resolve end i to its cluster root
+			int r = i; while (cl[r] != r) r = cl[r];
 
-		enclosed.addAll(startMatches.keySet());
-		enclosed.retainAll(endMatches.keySet());
+			// add this end to its cluster's member list
+			if (!clusters.containsKey(r)) clusters.put(r, new ArrayList<Integer>());
+			clusters.get(r).add(i);
 
-		// tSections will contain lines that intersect at the same point as 2+ other
-		// lines
-		// none of which are enclosed
-		final Set<Line> tSections = new java.util.LinkedHashSet<Line>(startMatches.keySet());	//CILIAQ-MOD for determinability
-		tSections.addAll(endMatches.keySet());
-		tSections.removeAll(enclosed);
-		final List<List<Line>> lineSets = new ArrayList<List<Line>>();
+			// record which cluster this line's start/end sits in
+			if (!clusterOf.containsKey(eLine.get(i))) clusterOf.put(eLine.get(i), new int[] { -1, -1 });
+			clusterOf.get(eLine.get(i))[eSide.get(i)] = r;
+		}
+		
+		// --- 2. overlap pieces
+		// A line counts as an "overlap piece" (a short redundant bridge between two junctions)
+		// if BOTH its ends sit on junction clusters, those clusters are DIFFERENT, and the line
+		// is short (length <= OVERLAP_WIDTHS line-widths). These get skipped during joint-building.
+		final Set<Line> overlap = new java.util.LinkedHashSet<Line>();
+		
+		// Flag short bridge lines between two different junctions as overlap pieces (skipped later).
+		for (final Map.Entry<Line, int[]> e : clusterOf.entrySet()) {
+			final int[] c = e.getValue();   // c[0] = start-end cluster, c[1] = end-end cluster (-1 = free)
+			if (c[0] >= 0 && c[1] >= 0															// both ends on junction
+					&& c[0] != c[1]																// spans two junctions
+					&& e.getKey().estimateLength() <= OVERLAP_WIDTHS * lineWidth(e.getKey()))	// is short
+				overlap.add(e.getKey());
+		}
+		
+		// --- 3. candidate joints
+		//	A "joint" is one proposed connection between two line ends. It is stored across six parallel
+		//	lists, all indexed by the same joint number o:
+		//	  jA[o], jB[o]   = the two lines being joined
+		//	  jEA[o], jEB[o] = which END of each (0 = start, 1 = end) the joint attaches to
+		//	  jIns[o]        = the overlap piece the joint passes through, or null if the ends simply meet
+		//	  jScore[o]      = straightness of the resulting path (lower = straighter, so better)
+		final List<Line> jA = new ArrayList<Line>(), jB = new ArrayList<Line>(), jIns = new ArrayList<Line>();
+		final List<Integer> jEA = new ArrayList<Integer>(), jEB = new ArrayList<Integer>();
+		final List<Float> jScore = new ArrayList<Float>();
+		for (final List<Integer> members : clusters.values()) {			// within one cluster
+			for (int x = 0; x < members.size(); x++) for (int y = x + 1; y < members.size(); y++) {
+				final Line a = eLine.get(members.get(x)), b = eLine.get(members.get(y));
+				
+				// skip if same line, or if either line was already used in another joint
+				if (a == b || overlap.contains(a) || overlap.contains(b)) continue;
+				
+				final float[] pa = endPoint(a, eSide.get(members.get(x))), pb = endPoint(b, eSide.get(members.get(y)));
+				
+				//	ia, ib: a point a short way INTO each line from its end, giving the direction the line
+				//	arrives from. pa->ia and pb->ib are the two approach directions; bendDeg compares them.
+				final float[] ia = getInterceptPoint(pa, a), ib = getInterceptPoint(pb, b);
+				
+				// if turn to sharp defined by MAX_BEND_DEG variable (0 = straight, 180 = U-turn) -> reject this connection
+				if (bendDeg(ia, pa, pb, ib) > MAX_BEND_DEG) continue;
+				
+				// register this joint between segments a and b, with its straightness score
+				addJoint(jA, jEA, jB, jEB, jIns, jScore, a, eSide.get(members.get(x)), b, eSide.get(members.get(y)), null,
+						straightCalc(ia, pa, pb, ib));
+			}
+		}
+		
+		// Candidate joints that pass THROUGH an overlap piece: connect a line arriving at one
+		// side of the bridge (cluster c[0]) to a line arriving at the other side (cluster c[1]).
+		// jIns = ov records the bridge; straightness is measured across it (via p0, p1).
+		for (final Line ov : overlap) {
+			final int[] c = clusterOf.get(ov);         											// c[0], c[1] = the two clusters it links			
+			final float[] p0 = endPoint(ov, 0), p1 = endPoint(ov, 1);			// the bridge's two endpoints
+			
+			// pair every line end in cluster c[0] with every line end in cluster c[1]
+			for (final Integer s : clusters.get(c[0])) for (final Integer t : clusters.get(c[1])) {
+				final Line a = eLine.get(s), b = eLine.get(t);									// line arriving at the c[0] side (a) and c
+				
+				// Prohibit self-join, no overlap pieces as endpoints
+				if (a == b || overlap.contains(a) || overlap.contains(b)) continue;
 
-		// Build our list of intersecting sets
-		for (final Line l1 : tSections) {
-			boolean found = false;
-
-			// search all line sets until we find an intersection with
-			// the current line
-			for (int i = 0; i < lineSets.size() && !found; i++) {
-				final List<Line> intersects = lineSets.get(i);
-
-				for (int j = 0; j < intersects.size() && !found; j++) {
-					final Line l2 = intersects.get(j);
-
-					// NB: we do not need to take the extra step of ensuring all
-					// lines intersect at the same point (instead of some intersecting at
-					// the start
-					// and some at the end, creating chains) because we have already
-					// filtered out
-					// the "enclosed" segments that would have arisen from that style of
-					// overlap.
-					if (intersects(l1, l2, SIGMA)) {
-						found = true;
-						intersects.add(l1);
-					}
+				// approach directions into a and b
+				final float[] ia = getInterceptPoint(endPoint(a, eSide.get(s)), a), ib = getInterceptPoint(endPoint(b, eSide.get(t)), b);
+				
+				// reject if the overall turn through the bridge is too sharp
+				if (bendDeg(ia, endPoint(a, eSide.get(s)), endPoint(b, eSide.get(t)), ib) > MAX_BEND_DEG) continue;
+				
+				// register the joint, recording ov as the piece it passes through
+				addJoint(jA, jEA, jB, jEB, jIns, jScore, a, eSide.get(s), b, eSide.get(t), ov,
+						straightCalc(ia, p0, p1, ib));
+			}
+		}
+		
+		// --- 4. accept straightest first
+		// Greedy selection: sort all candidate joints by straightness (best first), then walk the
+		// list and accept each joint only if it violates none of the rules below. Accepting a joint
+		// links two line ends into a longer filament chain. Three data structures track state:
+		//   order[]   = joint indices sorted straightest-first (stable, so ties keep proposal order)
+		//   joint     = line -> [joint claiming its start end, joint claiming its end end]
+		//   root      = union-find over LINES, to detect joints that would close a loop
+		//   carried   = overlap piece -> how many filaments already pass through it
+		
+		final Integer[] order = new Integer[jA.size()];
+		for (int i = 0; i < order.length; i++) order[i] = i;
+		Arrays.sort(order, new java.util.Comparator<Integer>() {		// stable: ties keep proposal order
+			public int compare(final Integer p, final Integer q) { return Float.compare(jScore.get(p), jScore.get(q)); }
+		});
+		final Map<Line, Integer[]> joint = new java.util.LinkedHashMap<Line, Integer[]>();	// [joint at start, joint at end]
+		final Map<Line, Line> root = new java.util.LinkedHashMap<Line, Line>();
+		final Map<Line, Integer> carried = new java.util.LinkedHashMap<Line, Integer>();	// filaments through each overlap piece
+		
+		//	Walk joints straightest-first and accept each one unless it breaks a rule. joint[line][end]
+		//	records which joint (if any) already claimed that end; root is a second union-find, over lines,
+		//	to detect and reject joints that would close a loop.
+		for (final Integer o : order) {
+			final Line a = jA.get(o), b = jB.get(o), ins = jIns.get(o);
+			final int ea = jEA.get(o), eb = jEB.get(o);
+			if (!joint.containsKey(a)) { joint.put(a, new Integer[2]); root.put(a, a); }
+			if (!joint.containsKey(b)) { joint.put(b, new Integer[2]); root.put(b, b); }
+			if (joint.get(a)[ea] != null || joint.get(b)[eb] != null) continue;				// rule: one partner per line end
+			if (ins != null && carried.containsKey(ins) && carried.get(ins) >= 2) continue;	// rule: a crossing is two filaments, so at most two through one overlap piece
+			Line ra = a, rb = b;
+			while (root.get(ra) != ra) ra = root.get(ra);	// find root of a's chain
+			while (root.get(rb) != rb) rb = root.get(rb);	// find root of b's chain
+			if (ra == rb) continue;							// rule: already in the same chain -> would form a cycle
+			
+			// accept: all rules passed, so commit the joint
+			root.put(ra, rb);								// accept: merge the two chains
+			if (ins != null) carried.put(ins, carried.containsKey(ins) ? carried.get(ins) + 1 : 1);
+			joint.get(a)[ea] = o;							// claim a's end so nothing else can use it
+			joint.get(b)[eb] = o;                           // claim b's end likewise
+		}
+		
+		// --- 5. chains
+		final Set<Line> finalLines = new java.util.LinkedHashSet<Line>(lines);
+		final Set<Line> visited = new java.util.HashSet<Line>();
+		final List<Line> merged = new ArrayList<Line>();
+		
+		//	Each accepted chain is walked from one of its two free ends to the other, collecting the lines
+		//	(and any overlap pieces between them) in order, with a reverse flag so concatenate can lay them
+		//	head-to-tail. Start only at a chain END - a line with a joint on exactly one side.
+		for (final Line t : lines) {
+			final Integer[] tj = joint.get(t);
+			
+			//	Skip: not in any chain, already walked, or joined on BOTH sides (a middle line, not an end).
+			if (tj == null || visited.contains(t) || (tj[0] == null) == (tj[1] == null)) continue;
+			
+			final List<Line> parts = new ArrayList<Line>();
+			final List<Boolean> rev = new ArrayList<Boolean>();	// per part: lay it reversed?
+			Line cur = t;
+			int entry = tj[0] == null ? 0 : 1;	// the end we came IN by (the free end has no joint)
+			while (true) {
+				visited.add(cur);
+				parts.add(cur); rev.add(entry == 1);			// entered at the end -> reverse so it reads start..end
+				final int exit = 1 - entry;						// leave by the opposite end
+				final Integer o = joint.get(cur)[exit];
+				
+				if (o == null) break;							// no joint here: this is the far end of the chain
+				
+				//	The joint stores its two lines as a and b; find which one is cur, so next is the other.
+				final boolean curIsA = jA.get(o) == cur && jEA.get(o) == exit;
+				final Line next = curIsA ? jB.get(o) : jA.get(o);
+				final int nextEnd = curIsA ? jEB.get(o) : jEA.get(o);	// the end of next this joint attaches to
+				final Line ins = jIns.get(o);
+				if (ins != null) {								// insert the overlap piece, oriented from cur's side to next's
+					final boolean insStartAtCur = clusterOf.get(ins)[0] == clusterOf.get(cur)[exit];
+					parts.add(ins); rev.add(!insStartAtCur);
 				}
+				cur = next; entry = nextEnd;					// step onto next; we entered it at nextEnd
 			}
-
-			// if no match, start next list
-			if (!found) {
-				final List<Line> lineList = new ArrayList<Line>();
-				lineList.add(l1);
-				lineSets.add(lineList);
-			}
+			if (parts.size() < 2) continue;						// nothing was joined
+			final Line m = concatenate(parts, rev);
+			
+			//	Map every consumed part to the new merged line (for junction updating), and drop the parts
+			//	from the output set. An overlap piece carried by two chains is mapped by whichever is first.
+			for (final Line l : parts) { if (!lineMap.containsKey(l)) lineMap.put(l, m); finalLines.remove(l); }
+			merged.add(m);
 		}
-
-		// populate nWay intersection list
-		for (final List<Line> intersects : lineSets) {
-			if (intersects.size() >= 3)
-				nWay.add(intersects);
-		}
-
-		if (verbose) {
-			for (final List<Line> isect : nWay) {
-				final StringBuffer sb = new StringBuffer();
-				sb.append("Found n-way intersection: ");
-				for (final Line l : isect)
-					sb.append(l.getID() + " ");
-				IJ.log(sb.toString());
-			}
-		}
-
-		// clean up enclosed lines.. any enclosed line that intersects with another
-		// enclosed line at BOTH ends should be removed.
-
-		boolean pruneEnclosed = true;
-
-		while (pruneEnclosed) {
-			pruneEnclosed = false;
-			Line toRemove = null;
-
-			for (final Line l1 : enclosed) {
-				boolean foundStartMatch = false;
-				boolean foundEndMatch = false;
-
-				for (final Line l2 : enclosed) {
-					if (l2 == l1)
-						continue;
-					else if (intersectsStart(l1, l2, SIGMA))
-						foundStartMatch = true;
-					else if (intersectsEnd(l1, l2, SIGMA))
-						foundEndMatch = true;
-
-					if (foundStartMatch && foundEndMatch)
-						break;
-				}
-
-				// found a line to prune
-				// remove it and restart
-				if (foundStartMatch && foundEndMatch) {
-					toRemove = l1;
-					pruneEnclosed = true;
-				}
-			}
-
-			if (toRemove != null)
-				enclosed.remove(toRemove);
-		}
-
-		if (verbose) {
-			for (final Line l : enclosed)
-				IJ.log("Found enclosed line: " + l.getID());
-		}
+		finalLines.addAll(merged);
+		final Lines out = new Lines(lines.getFrame());
+		out.addAll(finalLines);
+		return out;
 	}
 
 	/**
-	 * Step 2: for each enclosed line, we want to map to the sets of all other lines
-	 * with one intersection at the start, and all lines with one intersection at
-	 * the end.
+	 * Appends one candidate joint to the six parallel joint-lists (all indexed by the same
+	 * joint number). A joint is a proposed connection between the end {@code ea} of line
+	 * {@code a} and the end {@code eb} of line {@code b}, optionally passing through an
+	 * overlap piece {@code ins}.
+	 * <p>
+	 * An invalid score ({@code NaN} or infinite) is replaced with {@link Float#MAX_VALUE} so
+	 * the joint sorts last (worst) rather than corrupting the straightest-first ordering.
 	 *
-	 * @param lines
-	 *            the lines
-	 * @param enclosedLines
-	 *            the enclosed lines
-	 * @param startIntersections
-	 *            the start intersections
-	 * @param endIntersections
-	 *            the end intersections
-	 * @param verbose
-	 *            the verbose
+	 * @param jA     list of first lines; receives {@code a}
+	 * @param jEA    list of first-line ends; receives {@code ea} (0 = start, 1 = end)
+	 * @param jB     list of second lines; receives {@code b}
+	 * @param jEB    list of second-line ends; receives {@code eb} (0 = start, 1 = end)
+	 * @param jIns   list of overlap pieces; receives {@code ins} ({@code null} if the ends meet directly)
+	 * @param jScore list of straightness scores; receives the (sanitised) {@code score}
+	 * @param a      first line to join
+	 * @param ea     which end of {@code a} the joint attaches to (0 = start, 1 = end)
+	 * @param b      second line to join
+	 * @param eb     which end of {@code b} the joint attaches to (0 = start, 1 = end)
+	 * @param ins    overlap piece the joint passes through, or {@code null} if the ends meet directly
+	 * @param score  straightness of the resulting path (lower = straighter); {@code NaN}/infinite is
+	 *               clamped to {@link Float#MAX_VALUE}
 	 */
-	private void buildIntersectionMaps(final Lines lines, final Set<Line> enclosedLines,
-			final Map<Line, List<Line>> startIntersections, final Map<Line, List<Line>> endIntersections,
-			final boolean verbose) {
-		for (final Line l1 : enclosedLines) {
-			final List<Line> startIsect = new ArrayList<Line>();
-			final List<Line> endIsect = new ArrayList<Line>();
-			for (final Line l2 : lines) {
-				if (l2 == l1)
-					continue;
-				else if (intersectsStart(l1, l2, SIGMA))
-					startIsect.add(l2);
-				else if (intersectsEnd(l1, l2, SIGMA))
-					endIsect.add(l2);
-			}
-			startIntersections.put(l1, startIsect);
-			endIntersections.put(l1, endIsect);
-		}
+	private static void addJoint(final List<Line> jA, final List<Integer> jEA, final List<Line> jB, final List<Integer> jEB,
+			final List<Line> jIns, final List<Float> jScore, final Line a, final int ea,
+			final Line b, final int eb, final Line ins, float score) {
+		if (Float.isNaN(score) || Float.isInfinite(score)) score = Float.MAX_VALUE;
+		jA.add(a); jEA.add(ea); jB.add(b); jEB.add(eb); jIns.add(ins); jScore.add(score);
+	}
+	
+	/** The coordinates of one end of a line: side 0 = its first point, side 1 = its last point. */
+	private float[] endPoint(final Line l, final int side) {
+		return getPoint(l, side == 0 ? 0 : l.getNumber() - 1);
+	}
 
-		if (verbose) {
-			for (final Line l1 : enclosedLines) {
-				IJ.log("For enclosed line " + l1.getID() + " found intersecting lines: ");
-				for (final Line l2 : startIntersections.get(l1)) {
-					IJ.log("\tat start: " + l2.getID());
-				}
-				for (final Line l2 : endIntersections.get(l1)) {
-					IJ.log("\tat end: " + l2.getID());
-				}
-			}
+	/** CiliaQ-MOD (modification 9): how much the path bends at a joint, in degrees.
+	 *  Measures the angle between the approaching direction (u = endA - inA) and the
+	 *  leaving direction (v = inB - endB), i.e. the ANGLE BETWEEN two "travel-direction"
+	 *  vectors — NOT the interior joint angle.
+	 *    0   = straight through (u and v parallel, same direction)
+	 *    90  = right-angle turn
+	 *    180 = U-turn (u and v antiparallel)
+	 *  NOTE: this is the supplement of the conventional interior angle (where straight = 180).
+	 *  Degenerate case: if either segment has zero length, returns 180 (treated as a U-turn). */
+	private static double bendDeg(final float[] inA, final float[] endA, final float[] endB, final float[] inB) {
+		final double ux = endA[0] - inA[0], uy = endA[1] - inA[1], vx = inB[0] - endB[0], vy = inB[1] - endB[1];
+		final double nu = Math.hypot(ux, uy), nv = Math.hypot(vx, vy);
+		if (nu == 0 || nv == 0) return 180;
+		return Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (nu * nv)))));
+	}
+
+	/** Mean full line width as estimated by the detector; without an estimate (Estimate width off), the
+	 *  nominal width from the detection sigma; 2 * SIGMA only if neither is known. */
+	private float lineWidth(final Line l) {
+		final float fallback = nominalWidth > 0 ? nominalWidth : 2 * SIGMA;
+		if (l.width_l == null || l.width_r == null || l.width_l.length == 0) return fallback;
+		double s = 0; int n = 0;
+		for (int i = 0; i < l.width_l.length && i < l.width_r.length; i++) {
+			final double w = l.width_l[i] + l.width_r[i];
+			if (w > 0) { s += w; n++; }
 		}
+		return n == 0 ? fallback : (float) (s / n);
+	}
+
+	/**	Build one merged Line from the ordered parts. rev[i] says whether part i must be laid down
+	 *	back-to-front so that the parts connect end-to-start and the merged line reads continuously. Each
+	 *	per-point array (angle, width, ...) is copied in the same order. */
+	private static Line concatenate(final List<Line> parts, final List<Boolean> rev) {
+		int n = 0, frame = 0;
+		for (final Line l : parts) { n += l.getNumber(); frame = l.getFrame(); }
+		final Line m = new Line();
+		m.angle = new float[n]; m.asymmetry = new float[n]; m.col = new float[n]; m.row = new float[n];
+		m.response = new float[n]; m.intensity = new float[n]; m.width_l = new float[n]; m.width_r = new float[n];
+		m.num = n;
+		m.setContourClass(contour_class.cont_no_junc);
+		m.setFrame(frame);
+		int pos = 0;
+		for (int i = 0; i < parts.size(); i++) {
+			final Line l = parts.get(i); final boolean r = rev.get(i); final int len = l.getNumber();
+			copyArray(l.angle, m.angle, pos, len, r); copyArray(l.asymmetry, m.asymmetry, pos, len, r);
+			copyArray(l.col, m.col, pos, len, r); copyArray(l.row, m.row, pos, len, r);
+			copyArray(l.response, m.response, pos, len, r); copyArray(l.intensity, m.intensity, pos, len, r);
+			copyArray(l.width_l, m.width_l, pos, len, r); copyArray(l.width_r, m.width_r, pos, len, r);
+			pos += len;
+		}
+		return m;
 	}
 
 	/**
-	 * Step 3a: With all mapped combinations determined, we determine the
-	 * combinations that best preserve slope/straightness.
+	 * Copies {@code len} elements from {@code src} into {@code dst} starting at index
+	 * {@code pos}, optionally in reverse order. If {@code src} is {@code null}, the target
+	 * range is filled with zeros instead.
 	 *
-	 * @param lineMerges
-	 *            the line merges
-	 * @param enclosedLines
-	 *            the enclosed lines
-	 * @param startIntersections
-	 *            the start intersections
-	 * @param endIntersections
-	 *            the end intersections
-	 * @param verbose
-	 *            the verbose
+	 * @param src the source array, or {@code null} to zero-fill the target range
+	 * @param dst the destination array (written in place)
+	 * @param pos the starting index in {@code dst} to write to
+	 * @param len the number of elements to copy
+	 * @param rev if {@code true}, elements are copied in reverse order
+	 *            ({@code src[len-1]} first); if {@code false}, in forward order
 	 */
-	private void buildMergeList(final List<List<Line>> lineMerges, final Set<Line> enclosedLines,
-			final Map<Line, List<Line>> startIntersections, final Map<Line, List<Line>> endIntersections,
-			final boolean verbose) {
-		for (final Line enclosed : enclosedLines) {
-
-			// 1. first compute points of interest. We separate them by
-			// count in case there are not even pairings
-			final List<float[]> startPoints = new ArrayList<float[]>();
-			final List<float[]> endPoints = new ArrayList<float[]>();
-
-			final List<Line> startLines = startIntersections.get(enclosed);
-			final List<Line> endLines = endIntersections.get(enclosed);
-
-			final float[] enclosedStart = new float[] { enclosed.getXCoordinates()[0], enclosed.getYCoordinates()[0] };
-
-			final float[] enclosedEnd = new float[] { enclosed.getXCoordinates()[enclosed.getNumber() - 1],
-					enclosed.getYCoordinates()[enclosed.getNumber() - 1] };
-
-			for (final Line l : startLines) {
-				startPoints.add(getInterceptPoint(enclosedStart, l));
-			}
-
-			for (final Line l : endLines) {
-				endPoints.add(getInterceptPoint(enclosedEnd, l));
-			}
-
-			// TODO minimize global error instead of greedily taking least error
-			// 2. for each line in the small set, find the line in the large set
-			// that would create the straightest merge.
-			while (startLines.size() > 0 && endLines.size() > 0) {
-				int startIndex = 0;
-				int endIndex = 0;
-				float minStraightness = Float.MAX_VALUE;
-				final List<Line> toMerge = new ArrayList<Line>();
-
-				for (int i = 0; i < startLines.size(); i++) {
-					for (int j = 0; j < endLines.size(); j++) {
-						final float straightness = straightCalc(startPoints.get(i), enclosedStart, enclosedEnd,
-								endPoints.get(j));
-
-						if (straightness < minStraightness) {
-							startIndex = i;
-							endIndex = j;
-							minStraightness = straightness;
-						}
-					}
-				}
-
-				// Create the merge set
-				toMerge.add(startLines.remove(startIndex));
-				toMerge.add(enclosed);
-				toMerge.add(endLines.remove(endIndex));
-
-				// add it to the list of merges
-				lineMerges.add(toMerge);
-
-				// remove the selected points
-				startPoints.remove(startIndex);
-				endPoints.remove(endIndex);
-			}
-
-			// TODO this is an opportunity for configuration (could merge unmatched
-			// lines with enclosed)
-			// 3. Unmatched lines are treated as singletons
-			final List<Line> unmatched = startLines.size() > 0 ? startLines : endLines;
-			for (final Line line : unmatched) {
-				final List<Line> toMerge = new ArrayList<Line>();
-				toMerge.add(line);
-				lineMerges.add(toMerge);
-			}
-		}
-
-		// Clean up the merges
-		// If the end of one merge == the start of another, those merges are joined
-		// together
-		int i = 0, j = 1;
-		while (j < lineMerges.size()) {
-			final List<Line> list1 = lineMerges.get(i);
-			final List<Line> list2 = lineMerges.get(j);
-
-			if (list1.get(0) == list2.get(list2.size() - 1)) {
-				lineMerges.remove(i);
-				list1.remove(0);
-				list2.addAll(list1);
-				i = 0;
-				j = 1;
-			} else if (list2.get(0) == list1.get(list1.size() - 1)) {
-				lineMerges.remove(j);
-				list2.remove(0);
-				list1.addAll(list2);
-				i = 0;
-				j = 1;
-			} else {
-				j++;
-				if (j == lineMerges.size()) {
-					i++;
-					j = i + 1;
-				}
-			}
-		}
-
-		if (verbose) {
-			for (List<Line> merge : lineMerges) {
-				StringBuilder sb = new StringBuilder();
-				sb.append("Merging lines: ");
-
-				for (final Line line : merge) {
-					sb.append(line.getID());
-					sb.append(" ");
-				}
-				IJ.log(sb.toString());
-			}
-		}
-	}
-
-	/**
-	 * Step 3b: The process for determining merges from N-way merges is to find the
-	 * point where each line intersects, then compute the straightness of each
-	 * potential merge and take the straightest.
-	 *
-	 * @param lineMerges
-	 *            the line merges
-	 * @param nWayIntersections
-	 *            the n way intersections
-	 * @param verbose
-	 *            the verbose
-	 */
-	private void buildMergeList(List<List<Line>> lineMerges, List<List<Line>> nWayIntersections, boolean verbose) {
-		for (final List<Line> iSection : nWayIntersections) {
-			// 1. Check the first two lines to determine the junction
-			final float[] junction = new float[2];
-
-			final Line testLine = iSection.get(0);
-			int index = 0;
-			if (intersectsEnd(testLine, iSection.get(1), SIGMA))
-				index = testLine.getNumber() - 1;
-
-			junction[0] = testLine.getXCoordinates()[index];
-			junction[1] = testLine.getYCoordinates()[index];
-
-			// TODO use global error minimization instead of being greedy
-			// 2. Pair lines based on their straightness
-			// Merge sets are added as pairs or unpaired singleton lines.
-			while (iSection.size() > 1) {
-				final List<Line> merge = new ArrayList<Line>();
-				int idx1 = 0;
-				int idx2 = 1;
-				float minStraightness = Float.MAX_VALUE;
-
-				// Find the merge with most straightness in our set of lines
-				for (int i = 0; i < iSection.size(); i++) {
-					final float[] icept = getInterceptPoint(junction, iSection.get(i));
-					for (int j = i + 1; j < iSection.size(); j++) {
-						final float[] jcept = getInterceptPoint(junction, iSection.get(j));
-
-						final float curStraightness = straightCalc(icept, junction, jcept);
-						if (curStraightness < minStraightness) {
-							minStraightness = curStraightness;
-							idx1 = i;
-							idx2 = j;
-						}
-					}
-				}
-
-				// Add merged pair and remove from lists
-				merge.add(iSection.get(idx1));
-				merge.add(iSection.get(idx2));
-				iSection.remove(idx1);
-				// since we're removing from the same list, we need to decrement idx2 to
-				// account
-				// for removal of idx1
-				idx2--;
-				iSection.remove(idx2);
-
-				lineMerges.add(merge);
-			}
-
-			if (iSection.size() == 1) {
-				lineMerges.add(iSection);
-			}
-		}
-	}
-
-	/**
-	 * Step 4: resolve merged line list.
-	 *
-	 * @param originalLines
-	 *            the original lines
-	 * @param lineMerges
-	 *            the line merges
-	 * @param lineMap
-	 *            the line map
-	 * @param verbose
-	 *            the verbose
-	 * @return the lines
-	 */
-	private Lines buildResolvedList(final Lines originalLines, final List<List<Line>> lineMerges,
-			final Map<Line, Line> lineMap, final boolean verbose) {
-		final Set<Line> finalLines = new java.util.LinkedHashSet<Line>(originalLines);	//CILIAQ-MOD to achieve determinability
-
-		for (final List<Line> toMerge : lineMerges) {
-			// remove the individual, unmerged lines
-			finalLines.removeAll(toMerge);
-
-			int newSize = 0;
-			int frame = 0;
-			for (final Line l : toMerge) {
-				frame = l.getFrame();
-				newSize += l.getNumber();
-			}
-
-			// build and add the merged line
-			Line merged = null;
-			if (toMerge.size() == 1) {
-				merged = toMerge.get(0);
-			} else {
-				merged = new Line();
-				merged.angle = new float[newSize];
-				merged.asymmetry = new float[newSize];
-				merged.col = new float[newSize];
-				merged.row = new float[newSize];
-				merged.response = new float[newSize];
-				merged.intensity = new float[newSize];
-				merged.width_l = new float[newSize];
-				merged.width_r = new float[newSize];
-				merged.num = newSize;
-				// Assume the lines are now standing alone or no longer
-				// intersect on terminal ends and thus are "no_junc" class.
-				// This will be updated later after the Junction points are
-				// reassessed.
-				merged.setContourClass(contour_class.cont_no_junc);
-				merged.setFrame(frame);
-
-				// Get the enclosed line
-
-				int pos = 0;
-				for (int i = 0; i < toMerge.size(); i++) {
-					final Line line = toMerge.get(i);
-					Line adjacent = null;
-
-					if (i == 0)
-						adjacent = toMerge.get(i + 1);
-					else
-						adjacent = toMerge.get(i - 1);
-
-					int num = line.getNumber();
-					fillArray(line, adjacent, i == 0, merged.angle, pos, line.angle, num);
-					fillArray(line, adjacent, i == 0, merged.asymmetry, pos, line.asymmetry, num);
-					fillArray(line, adjacent, i == 0, merged.col, pos, line.col, num);
-					fillArray(line, adjacent, i == 0, merged.row, pos, line.row, num);
-					fillArray(line, adjacent, i == 0, merged.response, pos, line.response, num);
-					fillArray(line, adjacent, i == 0, merged.intensity, pos, line.intensity, num);
-					fillArray(line, adjacent, i == 0, merged.width_l, pos, line.width_l, num);
-					fillArray(line, adjacent, i == 0, merged.width_r, pos, line.width_r, num);
-					pos += num;
-
-					// map the original line to the merged
-					lineMap.put(line, merged);
-				}
-			}
-
-			finalLines.add(merged);
-		}
-
-		final Lines resolvedLines = new Lines(originalLines.getFrame());
-		resolvedLines.addAll(finalLines);
-
-		return resolvedLines;
+	private static void copyArray(final float[] src, final float[] dst, final int pos, final int len, final boolean rev) {
+		if (src == null) { Arrays.fill(dst, pos, pos + len, 0f); return; }
+		for (int i = 0; i < len; i++) dst[pos + i] = src[rev ? len - 1 - i : i];
 	}
 
 	/**
@@ -772,48 +655,6 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 		return (float) Math.sqrt(Math.pow((p2[0] - p1[0]), 2) + Math.pow((p2[1] - p1[1]), 2));
 	}
 
-	/**
-	 * Copy to the target at the given position. Use the source array if it is
-	 * non-null. Otherwise fill with 0's
-	 *
-	 * @param line
-	 *            the line
-	 * @param adjacent
-	 *            the adjacent
-	 * @param adjacentIsNext
-	 *            the adjacent is next
-	 * @param target
-	 *            the target
-	 * @param pos
-	 *            the pos
-	 * @param source
-	 *            the source
-	 * @param length
-	 *            the length
-	 */
-	private void fillArray(final Line line, final Line adjacent, final boolean adjacentIsNext, final float[] target,
-			int pos, final float[] source, final int length) {
-		if (source == null)
-			Arrays.fill(target, pos, pos + length, 0f);
-		else {
-			// If the adjacent (reference) line is the next line in the sequence, then
-			// we reverse the array if our current line's head is its intersection
-			// point.
-			// If the reference line is the previous line in the sequence, we reverse
-			// the
-			// array if our current line's tail is its intersection point.
-			if ((adjacentIsNext && intersectsStart(line, adjacent, SIGMA))
-					|| (!adjacentIsNext && intersectsEnd(line, adjacent, SIGMA))) {
-				// Reverse the source array
-				for (int i = source.length - 1; i >= 0; i--) {
-					target[pos++] = source[i];
-				}
-			}
-			// oriented appropriately
-			else
-				System.arraycopy(source, 0, target, pos, length);
-		}
-	}
 
 	/**
 	 * Helper method to get the point at {@code SLOPE_DIST} positions away from the
@@ -889,60 +730,6 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 	/**
 	 * Intersects.
 	 *
-	 * @param l1
-	 *            the l 1
-	 * @param l2
-	 *            the l 2
-	 * @param threshold
-	 *            the threshold
-	 * @return true iff the two specified lines intersect at their start or end
-	 *         points
-	 */
-	private boolean intersects(final Line l1, final Line l2, final float threshold) {
-		return intersectsStart(l1, l2, threshold) || intersectsEnd(l1, l2, threshold);
-	}
-
-	/**
-	 * Helper method to determine if the query line intersects with the target at
-	 * its start terminal.
-	 *
-	 * @param target
-	 *            the target
-	 * @param query
-	 *            the query
-	 * @param threshold
-	 *            the threshold
-	 * @return true, if successful
-	 */
-	private boolean intersectsStart(final Line target, final Line query, final float threshold) {
-		final float[] tStart = getPoint(target, 0);
-		final float[] qStart = getPoint(query, 0);
-		final float[] qEnd = getPoint(query, query.getNumber() - 1);
-		return intersects(tStart, qStart, threshold) || intersects(tStart, qEnd, threshold);
-	}
-
-	/**
-	 * Helper method to determine if the query line intersects with the target at
-	 * its end terminal.
-	 *
-	 * @param target
-	 *            the target
-	 * @param query
-	 *            the query
-	 * @param threshold
-	 *            the threshold
-	 * @return true, if successful
-	 */
-	private boolean intersectsEnd(final Line target, final Line query, final float threshold) {
-		final float[] tEnd = getPoint(target, target.getNumber() - 1);
-		final float[] qStart = getPoint(query, 0);
-		final float[] qEnd = getPoint(query, query.getNumber() - 1);
-		return intersects(tEnd, qStart, threshold) || intersects(tEnd, qEnd, threshold);
-	}
-
-	/**
-	 * Intersects.
-	 *
 	 * @param tEnd
 	 *            the t end
 	 * @param qEnd
@@ -991,30 +778,5 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 		return coords;
 	}
 
-	/**
-	 * Helper method to determine if a junction sits on the start point of a line.
-	 *
-	 * @param junction
-	 *            the junction
-	 * @param line
-	 *            the line
-	 * @return true, if successful
-	 */
-	private boolean matchesStart(final Junction junction, final Line line) {
-		return line.getXCoordinates()[0] == junction.getX() && line.getYCoordinates()[0] == junction.getY();
-	}
 
-	/**
-	 * Helper method to determine if a junction sits on the end point of a line.
-	 *
-	 * @param junction
-	 *            the junction
-	 * @param line
-	 *            the line
-	 * @return true, if successful
-	 */
-	private boolean matchesEnd(final Junction junction, final Line line) {
-		int count = line.getNumber() - 1;
-		return line.getXCoordinates()[count] == junction.getX() && line.getYCoordinates()[count] == junction.getY();
-	}
 }

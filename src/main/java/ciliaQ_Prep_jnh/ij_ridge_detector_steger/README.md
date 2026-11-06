@@ -52,22 +52,29 @@ the link above and should accompany this distribution.
 
 The installed Ridge Detection plugin produces **non-reproducible results**: the same image
 with the same parameters, in the same Fiji session, can yield a different set of detected
-lines between runs (observed e.g. as 12 vs 14 filaments on identical input). For
+lines between runs on identical input. For
 quantitative, mechanistic analysis we require **bit-for-bit reproducible** segmentation,
-so the code was copied in and corrected here. See "Modifications" below.
+so the code was copied in and corrected here. See "Modifications" below. The vendored
+copy also contained three further bugs. Two of them change which lines are detected and are
+fixed as modifications 8 and 9. The third caused an ArrayIndexOutOfBoundsException for sigma
+values below 0.7 and is fixed as modification 11.
 
 ## Modifications made to the original
 
-All changes are confined to determinism fixes; the detection algorithm is otherwise
-unchanged. Every modified file carries an inline comment marked `// CiliaQ-MOD:` at the
-point of change.
+Modifications 1–7 fix determinism or remove unused code and leave the computed lines unchanged.
+Modifications 8 and 9 fix two bugs and **change the output**, see *Observations and their investigation*.
+Modification 11 fixes a third bug (sigma values below 0.7 caused an ArrayIndexOutOfBoundsException)
+and changes nothing where the code worked.
+Modification 12 fixes a fourth bug: a self-assignment in the response-array reallocation silently
+zeroed accumulated response values on lines exceeding the initial buffer size; the fix restores
+correct responses and **changes the output** wherever such reallocation occurred. Every modified file
+carries an inline comment marked `// CiliaQ-MOD:` at the point of change.
 
 ### Background
 
 The original code produced **non-reproducible results**: the same image with the same
 parameters, in the same Fiji session, could return a different set of detected lines between
-runs (observed as e.g. 12–16 filaments and differing foreground voxel counts on byte-identical
-input). The causes were several order-dependent constructs — non-total-order comparators, an
+runs on byte-identical input. The cause was several order-dependent constructs: non-total-order comparators, an
 unreset static counter, and (most importantly) iteration over hash collections whose order is
 not defined. These were corrected as listed below. After the fixes, repeated runs — including
 across a full Fiji/JVM restart — produce identical output.
@@ -125,6 +132,8 @@ were non-reproducible on identical input, and differed even across a JVM restart
 `HashSet`/`HashMap` in this class was changed to `LinkedHashSet`/`LinkedHashMap`, which
 preserve insertion order (driven by deterministic loops over `junctions`/`lines`). Only the
 collection type changed; `contains`/`add`/`get`/`put` semantics are identical.
+*(`buildResolvedList` was later replaced by modification 9. The rule still holds for every collection
+that is iterated; the two plain `HashSet`s it adds are only used for lookups.)*
 
 7. **Stand-alone plugin GUI removed.** `Lines_.java` (the Ridge Detection menu command and its
 dialog), `GenericDialogPlus.java` and `ResetToDefaultListener.java` were deleted. CiliaQ calls
@@ -133,38 +142,93 @@ also removes a second class named `Lines_`, which follows ImageJ's plugin-naming
 re-sync with upstream, ignore these three files.
 
 
+8. **Junction sort limited to the junctions found** (`Link.java`) — **changes the output.**
+`compute_contours` sorted the whole pre-allocated junction array (`Arrays.sort(junc)`), including its
+empty padding, where Steger's C code sorts only the found junctions (`qsort(junc, num_junc, …)`). The
+padding sorted to the front and pushed real junctions past `num_junc`, so the split loop never cut
+those lines. The number of lines left uncut depended on how full the array was, so the result changed
+with the detection threshold. Now `Arrays.sort(junc, 0, num_junc)`. The loop
+that counts a line's junctions also read the array before checking its bound, and threw
+`ArrayIndexOutOfBoundsException` whenever the array was exactly full; it now checks the bound first.
+See *Observations and their investigation*, item 1.
+
+9. **Overlap resolution rebuilt** (`SlopeOverlapResolver.java`) — **changes the output.** The
+original treated every line with a junction at both ends as the overlap area of a crossing, however
+long, paired its neighbours straight through it, and emitted every proposed merge as its own line.
+One plain ridge came out as 3–4 copies (also in the released 1.4.1), and in tangles one filament was
+routed along another. `resolveByJunctionClusters` replaces the merge step:
+   - line ends on the same junction form a **cluster**;
+   - a line between two clusters and at most **4 line widths** long is the **overlap piece** of a
+     crossing. Two filaments of width *w* crossing at angle θ overlap over about *w* / sin(θ/2) —
+     1.4 widths at 90°, 2.6 at 45°, 3.9 at 30° — so crossings down to about 30° are traced through.
+     The width is the detector's estimate, or, with *Estimate width* off, the nominal width from sigma;
+   - candidate **joints** — between ends of one cluster, or through an overlap piece — are scored
+     with the original's `straightCalc` measure over the path they build, and accepted straightest
+     first: **one partner per line end**, no cycles, **at most two filaments through one overlap
+     piece**, and **only if the path bends by at most 60°** (a U-turn bends 180°, a T's side branch
+     90°);
+   - accepted joints are chained, so every line other than an overlap piece ends up in exactly one
+     output line.
+
+   The methods it replaces were removed. Tested on synthetic ridges with known geometry (single
+   ridges, crossings, T-junctions, crossing arcs, parallel ridges, tips meeting at an angle) and on
+   ICC and tissue IF images. Each filament now gives one output line instead of 2–4 copies, crossings
+   down to about 30° are traced through as two continuous filaments, and incorrect joins at crossings
+   are largely removed. **Not solved:** crossings shallower than about 30° are split into pieces
+   instead of traced through, and two filaments meeting tip to tip at a bend below 60° are joined into
+   one output line.
+
+10. **The overlap resolution can be given the line width** (`LineDetector.java`,
+   `SlopeOverlapResolver.java`) — **changes the output** when used. Modification 9 infers the nominal
+   width from sigma with the bar formula (w = 2√3 (σ − 0.5)). Cilia are thinner than the
+   resolution, so across the line they are Gaussian, and a sigma near 1 suits them; the formula then
+   gives 1.7 px, and a crossing's overlap piece (up to 4 widths) is no longer seen as one, so crossings
+   are not traced through. `LineDetector.setLineWidth(w)` passes the user's width; the resolver then
+   uses it (`SlopeOverlapResolver.forWidth`). Without it, the behaviour of modification 9 is unchanged.
+   CiliaQ Preparator's ridge detection always passes the width.
+
+11. **The search-line buffer fits small sigmas** (`Link.java`, `Width.java`) — no change in the output where
+   the code worked before. The line extension in `Link.compute_contours` and the width estimation in
+   `Width` collect the pixels of a search line of length 2.5 σ with `Width.bresenham`, into a buffer of
+   ceil(3 × 2.5 σ) entries. Bresenham writes one pixel per step plus at most one sideways, up to
+   2 (ceil(2.5 σ) + 1) entries, which is more than ceil(3 × 2.5 σ) for σ below 0.7. For σ below 0.7
+   this overflows the buffer; on real images σ 0.6 caused an `ArrayIndexOutOfBoundsException` in
+   nearly every plane. The buffer now has max(ceil(3 × 2.5 σ),
+   2 (ceil(2.5 σ) + 1)) entries; from σ 0.7 up that is the old size, so the result is unchanged.
+
+12. Fixed a ** response-array reallocation bug** in the line-linking step (`Link.compute_contours`).
+  The original code self-assigned (`resp[o] = resp[o]`)
+  into a freshly allocated array, silently zeroing all accumulated response values
+  whenever a line exceeded the initial buffer size. Responses are now copied correctly.
+
 ### Scope / what was NOT changed
 
-- The detection, linking, width, and correction mathematics are untouched.
+- The detection, width and position-correction mathematics are untouched. Linking is unchanged
+except for the junction sort (8); overlap resolution was rebuilt (9) and can take the line width (10);
+the search-line buffer fits small sigmas (11).
 
 
-## Observations and open questions (not addressed here)
+## Observations and their investigation
 
-These are pre-existing characteristics of the original algorithm that were noticed during the
-determinism work but **deliberately left unchanged**, because they concern what the algorithm computes,
-not *reproducibility*. They are recorded for future investigation.
+Two characteristics of the original algorithm were noticed during the determinism work and
+investigated afterwards (2026-10-30). The first turned out to be the visible symptom of two bugs, now
+fixed as modifications 8 and 9; the second is correct as it is.
 
-1. **"No main line" fallback in `fixJunctions` (`LineDetector.java`) — measured: mostly expected,
-partly a real miss.** At a junction position where no line passes *through* the point, the code
-falls back to connecting the lines that end there pairwise. The original author called this a bug
-(*"In manchen Fällen gibt es keine Hauptlinie… (bug im Algorithmus, ich bin aber nicht fähig ihn zu
-finden)"*). Measured on 2026-10-30, it is not rare — it is the usual path: **834 of 1073** junction
-positions (78 %) on a 2160 × 2160 ICC (immunocytochemistry) IF (immunofluorescence) image, 173 of 229
-(76 %) on a 1 µm/px tissue IF image. Grouped by how many distinct lines *end* at the junction:
+1. **"No main line" fallback in `fixJunctions` (`LineDetector.java`) — a symptom of two bugs,
+fixed as modifications 8 and 9.** Where no line passes *through* a junction point, the code connects the
+lines that end there pairwise. The original author called this a bug (*"In manchen Fällen gibt es
+keine Hauptlinie… (bug im Algorithmus, ich bin aber nicht fähig ihn zu finden)"*). Before the fixes
+it was the usual path. Investigation found two reasons, neither of them a bug in this branch itself:
 
-| lines ending at the junction | 1 | 2 | 3 | 4 | 5+ |
-|---|---|---|---|---|---|
-| ICC IF image | 80 | 14 | 627 | 100 | 13 |
-| tissue IF image | 8 | 0 | 100 | 52 | 13 |
+- **Steger's linking cuts every line at its junctions, by design** (`Link.compute_contours`, *"split
+the lines at the junction points"*). A T-junction is therefore three line ends meeting at a point,
+and no line passes through it. The pairwise "fallback" is the correct handling; the main-line branch
+only found lines that should have been cut and were not, because of the junction-sort bug.
+- **The junction-sort bug (modification 8)** left many junctions' lines uncut, so they stayed whole
+where they should have been split. Junctions with a single line end were then dropped. After the fix,
+every junction has two or more line ends.
 
-- **Three or more ends (~90 %) — expected, not a bug.** The through line was already split at this
-point in `Link.compute_contours`, so a T-junction shows three ends and a crossing four. No line has
-the point as an interior point, and pairing the ends is the right handling. The benign explanation
-suspected earlier is correct for these.
-- **Exactly one end (5–10 %) — a real miss.** A side line ends next to a through line, but the through
-line's nearest sample point is more than 0.1 px away: the test is `mindist[0] < 0.1`, while ridge
-points are sub-pixel. The through line is not recognised, the fallback finds a single line, forms
-no pair, and **the junction is dropped**.
+The overlap resolution that runs after this step had a second, independent bug: modification 9.
 
 2. **Coordinate (x/y) swap in `fixJunctions` (`LineDetector.java`) — correct and required.**
 `Link.compute_contours` stores junctions in Steger's (row, column) order — `junc.x = posx[…]` /
@@ -172,17 +236,23 @@ no pair, and **the junction is dropped**.
 i.e. image x = column, y = row. The swap converts one into the other.
 Not a bug; the code comment now says why (`CiliaQ-MOD`, comment only).
 
-Widening the 0.1 px tolerance is not a safe fix. It also accepts unrelated nearby lines as the through
-line. A correct fix would target only the one-end case. Left unchanged, as it would alter output against
-the published algorithm; the determinism fixes make the behaviour reproducible either way.
-
 ## Reporting upstream
 
 On 2026-10-29, we submitted a **pull request** (determinism fixes, https://github.com/thorstenwagner/ij-ridgedetection/pull/42)
 with the ordering/determinism changes listed under "Modifications made to the original" above.
 
+Modifications 8, 9 and 11 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1; that of 11
+is in the upstream code this copy was taken from. A second pull request waits until #42 is accepted — 
+the plugin is listed as unmaintained.
+
 ## Maintenance note
 
-This is foreign code adopted for determinism reasons. Keep changes minimal and clearly
-marked (`// CiliaQ-MOD:`) so they can be re-applied if the upstream code is updated, and so
-the diff against the original stays auditable.
+This is foreign code adopted for determinism reasons and for cilia images. Keep changes minimal and clearly
+marked (`// CiliaQ-MOD:`) so they can be re-applied if the upstream code is updated, and so the diff
+against the original stays auditable.
+
+Modification 9 replaces the merge step of `SlopeOverlapResolver` rather than patching it. When
+re-syncing with upstream, keep `resolveByJunctionClusters` and its helpers (`addJoint`, `endPoint`,
+`bendDeg`, `lineWidth`, `concatenate`, `copyArray`); the removed upstream methods are listed in the
+comment at the top of that file. After any re-sync, check single ridges, crossings and T-junctions
+on a test image: one line per filament, no copies.

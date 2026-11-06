@@ -488,7 +488,10 @@ public class Width {
 		grad = new float[(width * height)];
 
 		length = 2.5 * sigma;
-		max_line = (int) Math.ceil(length * 3);
+		/* CiliaQ-MOD (modification 11): bresenham writes up to 2*(ceil(length)+1) points,
+		 * so more than ceil(3*length) for sigma below 0.7.
+		 * Original code defined max_line as ceil(3*length), which could trigger an exception. */
+		max_line = Math.max((int) Math.ceil(length * 3), 2 * ((int) Math.ceil(length) + 1));
 		line = new Offset[max_line];
 		for (int o = 0; o < line.length; o++) {
 			line[o] = new Offset();

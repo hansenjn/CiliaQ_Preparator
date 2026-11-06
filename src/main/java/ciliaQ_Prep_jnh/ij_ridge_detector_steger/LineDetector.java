@@ -66,6 +66,15 @@ public class LineDetector {
 	/** The bechatty. */
 	boolean bechatty = false;
 
+	/** CiliaQ-MOD (modification 10): the nominal full line width in pixels for the overlap resolution; 0 = infer it from sigma. */
+	private double nominalLineWidth = 0;
+
+	/** CiliaQ-MOD (modification 10): set the line width the overlap resolution uses (the user's width, not one inferred from sigma). */
+	public LineDetector setLineWidth(double width) {
+		this.nominalLineWidth = width;
+		return this;
+	}
+	
 	/**
 	 * Detect lines.
 	 *
@@ -803,7 +812,9 @@ public class LineDetector {
 		case NONE:
 			break;
 		case SLOPE:
-			resolver = new SlopeOverlapResolver();
+			// CiliaQ-MOD (modification 10): the user's line width when the caller set one. Inferred from sigma with the bar formula,
+			// a Gaussian-profile sigma (1.0) gives 1.7 px, and a crossing's overlap piece (up to 4 widths) is then not seen as one.
+			resolver = nominalLineWidth > 0 ? SlopeOverlapResolver.forWidth(nominalLineWidth) : new SlopeOverlapResolver(sigma);	// CiliaQ-MOD (modification 9): the resolver needs the line width
 			break;
 		}
 
@@ -823,8 +834,14 @@ public class LineDetector {
 
 		// lines = contours;
 		fixContours(contours, resultJunction);
-		alreadyProcessedJunctionPoints = new java.util.HashSet<Integer>();
-		// Reconstruct solution from junction points. This have to be done, because in
+		
+		// CiliaQ-MOD: LinkedHashSet (insertion-ordered) instead of HashSet, for consistency with the
+		// other junction-ID sets and to guard against any future iteration. Only .add()/.contains() are
+		// used here, so order does not affect output today, but using LinkedHashSet keeps the intent
+		// uniform across the class (see the determinism note in detectLines / fixJunctions).
+		alreadyProcessedJunctionPoints = new java.util.LinkedHashSet<Integer>();
+		
+		// Reconstruct solution from junction points. This have to be done, because in 
 		// raw cases
 		// the algorithm corrupts the results. However, I was not able to find that bug
 		// so I decided

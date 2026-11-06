@@ -609,10 +609,16 @@ public class Link {
 							newArr[o] = angle[o];
 						}
 						angle = newArr;
-
+						
+						/* CiliaQ-MOD (modification 12): fix copy-paste bug in resp reallocation. Original code
+						 * was `resp[o] = resp[o]` (self-assignment), so the freshly allocated newArr stayed zeroed
+						 * and all accumulated response values were lost whenever the point array grew past its
+						 * initial size. Corrected to `newArr[o] = resp[o]` to match the row/col/angle blocks.
+						 * Occurs twice (main linking loop and double-response branch). */
 						newArr = new float[size_pnt];
 						for (int o = 0; o < resp.length; o++) {
-							resp[o] = resp[o];
+							// CiliaQ-MOD (modification 12): was `resp[o] = resp[o]`
+						    newArr[o] = resp[o];
 						}
 						resp = newArr;
 					}
@@ -767,7 +773,8 @@ public class Link {
 									angle = newArr;
 									newArr = new float[size_pnt];
 									for (int o = 0; o < resp.length; o++) {
-										resp[o] = resp[o];
+										// CiliaQ-MOD (modification 12): was `resp[o] = resp[o]`, see note above — copy resp into newArr, not resp into itself
+									    newArr[o] = resp[o];
 									}
 									resp = newArr;
 								}
@@ -874,7 +881,13 @@ public class Link {
 				s = -1;
 			double MAX_LINE_EXTENSION = 2.5 * sigma;
 			length = MAX_LINE_EXTENSION;
-			max_line = (int) Math.ceil(length * 3);
+			
+			/*	CiliaQ-MOD (modification 11): Width.bresenham writes up to 2 (ceil(length) + 1) points, which is
+			 *	more than ceil(3 length) for sigma below 0.7 (ArrayIndexOutOfBoundsException for original code at sigma 0.6;
+			 *	original code defined max_line as `Math.ceil(length * 3)`).
+			 *	*/
+			max_line = Math.max((int) Math.ceil(length * 3), 2 * ((int) Math.ceil(length) + 1));
+			
 			line = new Offset[max_line];
 			for (int o = 0; o < line.length; o++) {
 				line[o] = new Offset();
@@ -1151,14 +1164,26 @@ public class Link {
 			}
 		}
 
-		/* Done with linking. Now split the lines at the junction points. */
-		java.util.Arrays.sort(junc);
+		/* Done with linking. Now split the lines at the junction points. 
+		 * 
+		 * CiliaQ-MOD (modification 8): sort only the junctions that were found, as Steger's C code does
+		 * with qsort(junc, num_junc, ...). Sorting the whole pre-allocated array moved its empty padding
+		 * into [0, num_junc) and real junctions past it, so the loop below never cut their lines.
+		 * 
+		 * Sorting code before CiliaQ-MOD was: java.util.Arrays.sort(junc);
+		 * */
+		java.util.Arrays.sort(junc, 0, num_junc);
+		
 		for (i = 0; i < num_junc; i += k) {
 			j = junc[i].cont1;
 			tmp_cont = cont[j];
 			num_pnt = tmp_cont.num;
-			/* Count how often line j needs to be split. */
-			for (k = 0; junc[(i + k)].cont1 == j && i + k < num_junc; k++)
+
+			/* Count how often line j needs to be split: scan forward counting consecutive
+			 * junctions that belong to line j. Empty body — all work is in the header.
+			 * CiliaQ-MOD (modification 8): bound first; prior code: for (k = 0; junc[(i + k)].cont1 == j && i + k < num_junc; k++)
+			 */
+			for (k = 0; i + k < num_junc && junc[(i + k)].cont1 == j; k++)
 				;
 
 			if (k == 1 && tmp_cont.row[0] == tmp_cont.row[(num_pnt - 1)]
