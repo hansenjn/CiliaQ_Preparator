@@ -62,7 +62,7 @@ import ij.process.ImageProcessor;
  *
  * @author Jan N. Hansen
  */
-final class RidgeZ {
+public final class RidgeZ {
 
 	// fixed constants of the method (in line widths unless stated)
 	static final double COS30 = Math.cos(Math.toRadians(30));
@@ -516,11 +516,36 @@ final class RidgeZ {
 	}
 
 	/**
-	 * uphill to the peak this plane belongs to; a local maximum joins a higher one
-	 * across a shallow dip (a shoulder), or when it is a faint tail or an axial
-	 * side lobe of a much brighter structure close by
+	 * Find the peak of a z profile that a given plane belongs to.
+	 *
+	 * Starting at plane z, the method alternates two moves until neither applies:
+	 * <ol>
+	 * <li>CLIMB: step to the brighter neighbouring plane while one is strictly brighter, which reaches a local
+	 * maximum m.</li>
+	 * <li>JUMP: let m join a brighter maximum further along the profile, in one of two cases:
+	 * <ul>
+	 * <li>SHOULDER: walking away from m, a plane brighter than m is reached and the profile never dips below
+	 * {@code PROFILE_DIP} (0.8) x f[m] on the way. A shallow dip like this is noise on one peak, not a second
+	 * structure.</li>
+	 * <li>TAIL / SIDE LOBE: the brightest plane kM in that direction is much brighter (f[m] &lt;
+	 * {@code PROFILE_TAU} (0.1) x f[kM]), and m lies within {@code PROFILE_LOBES} (3) half-maximum widths of kM.
+	 * Such an m is the faint tail or axial side lobe of the bright structure, not an object of its own.</li>
+	 * </ul>
+	 * Downwards (towards plane 0) is tested before upwards, so the result is deterministic.</li>
+	 * </ol>
+	 * Every move goes to a strictly brighter plane, so the method always terminates. A genuine second maximum (a
+	 * deep dip and comparable brightness, or far away) is not joined, so two filaments at different depths keep
+	 * separate peaks.
+	 *
+	 * The result is a whole plane. Use {@link #refine(double[], int)} for the sub-plane position.
+	 *
+	 * @param f the z profile at one xy position, one value per plane (0-based). Values should be positive: the
+	 *          caller clamps them to at least 1e-3, because the ratio tests above and the logarithms in
+	 *          {@code refine} assume it. Not modified.
+	 * @param z the starting plane, 0 &lt;= z &lt; f.length (normally the plane the line point was detected in)
+	 * @return the index of the peak plane that z belongs to
 	 */
-	static int climb(double[] f, int z) {
+	public static int climb(double[] f, int z) {
 		int n = f.length, m = z;
 		for (;;) {
 			for (;;) {
