@@ -112,7 +112,7 @@ public class RidgeSegmenter {
 	public static Result detect(ImagePlus channelImp, RidgeSettings rs,  ProgressReporter progress) throws IllegalStateException {
 		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
 
-		// One warning per channel is enough; avoids spam if several planes are slow.
+		// One warning per call (one timepoint) is enough; avoids spam if several planes are slow.
 		final boolean[] warned = { false };
 		// 45 s for a single plane is far beyond normal; a correctly-thresholded 2048x2048 plane is seconds.
 		final SlowWatchdog watchdog = new SlowWatchdog(45_000, () -> {
@@ -129,10 +129,6 @@ public class RidgeSegmenter {
 		 *	classic path (with the clean-up rules). */
 		int[][] perVoxel; int nLines;
 		if (D > 1 && !RidgeSettings.Z_CLASSIC.equals(rs.zMethod)) {
-			if (!channelImp.getCalibration().scaled())	// in-focus and 3D measure distances in z with the voxel size
-				progress.notifyMessage("Ridge detection (" + rs.zMethodToken() + "): this stack has no voxel size, so voxels are treated as"
-						+ " cubes and filaments stacked in z join too easily. Set the voxel size (Image > Properties) and run again.",
-						ProgressReporter.NOTIFICATION);
 			RidgeZ.Output o = RidgeZ.detect(channelImp, rs, RidgeSettings.Z_3D.equals(rs.zMethod), progress, watchdog);
 			perVoxel = o.labels; nLines = o.nLines;
 		} else {
@@ -334,6 +330,26 @@ public class RidgeSegmenter {
 		return dropped;
 	}
 
+	/**
+	 * The z notes for one channel, or null: in-focus / 3D on a stack without voxel size, or Classic with short pieces
+	 * joined or dropped (Classic paints every plane a line is seen in, so it cannot tell a standing cilium from a short
+	 * piece). Called ONCE per channel by the caller.
+	 */
+	public static String stackNote(ImagePlus imp, RidgeSettings rs) {
+		if (imp.getNSlices() <= 1) return null;
+		if (!RidgeSettings.Z_CLASSIC.equals(rs.zMethod)) {
+			if (imp.getCalibration().scaled()) return null;
+			return "ridge detection (" + rs.zMethodToken() + "): this stack has no voxel size, so voxels are treated as"
+					+ " cubes and filaments stacked in z join too easily. Set the voxel size (Image > Properties) and run again.";
+		}
+		if (RidgeSettings.SHORT_APART.equals(rs.shortPieces)) return null;
+		return "ridge detection (classic): short pieces are set to '" + rs.shortPieces + "'. Classic has no z"
+				+ " information, so an upright (standing) cilium - short in x,y but tall in z - can be mistaken for a short piece and "
+				+ (RidgeSettings.SHORT_DROP.equals(rs.shortPieces) ? "dropped" : "merged into a neighbour") + ". With standing cilia,"
+				+ " use the 'in-focus' or '3D' z method, or set short pieces to 'keep apart' (CiliaQ's minimum size filter can then"
+				+ " remove the short pieces).";
+	}
+	
 	/** Steger on one plane, timed by the watchdog */
 	static Lines detectPlane(ImageProcessor ip, RidgeSettings rs, double minLength, OverlapOption overlap, SlowWatchdog watchdog) {
 		LineDetector det = new LineDetector().setLineWidth(rs.lineWidth);	// New V0.2.1: the resolver gets the user's width
@@ -422,7 +438,7 @@ public class RidgeSegmenter {
 	 * FIRST WRITER WINS: a voxel is claimed only if it is still background (0). Earlier lines therefore keep
 	 * their pixels where lines overlap, rather than being overwritten. One consequence is that a line whose
 	 * footprint is entirely covered by earlier lines paints nothing - which is why object numbering later
-	 * counts PAINTED voxels, not line indices (see the renumbering step in detect()).
+	 * counts PAINTED voxels, not line indices (see numbered()).
 	 *
 	 * @param L             the line as rows {x, y, response} or, with estimated widths, {x, y, response, width left, width right}
 	 *                      (New V0.2.1: rows instead of the Line object, so a line the kink rule cut keeps its widths)
@@ -460,15 +476,6 @@ public class RidgeSegmenter {
 			a = p[a];
 		}
 		return a;
-	}
-
-	/**
-	 * Union-find "union": merge the groups containing a and b into one. Finds both roots and, if they
-	 * differ, points one root at the other so from now on both elements resolve to the same root.
-	 */
-	private static void union(int[] p, int a, int b) {
-		a = find(p, a); b = find(p, b);
-		if (a != b) p[b] = a;
 	}
 
 	// ------------------------------------------------------------------ bit depth
