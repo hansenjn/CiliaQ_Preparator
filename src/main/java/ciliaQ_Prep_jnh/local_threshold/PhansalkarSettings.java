@@ -43,6 +43,9 @@ public class PhansalkarSettings {
 
 	// ------------------------------------------------------------------ dialog
 
+	/** The wiki page of this method, the target of the dialog's Help button. */
+	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Phansalkar-local-threshold-in-CiliaQ-Preparator";
+	
 	public static PhansalkarSettings initByGD(String task) throws Exception {
 		PhansalkarSettings settingsInstance = new PhansalkarSettings();
 
@@ -81,7 +84,8 @@ public class PhansalkarSettings {
 		gd.addNumericField("p", settingsInstance.p, 4);
 		gd.setInsets(0, 0, 0);
 		gd.addNumericField("q", settingsInstance.q, 4);
-
+		
+		gd.addHelp(HELP_URL);
 		gd.showDialog();
 		if (gd.wasCanceled()) throw new Exception("Phansalkar settings dialog cancelled");
 

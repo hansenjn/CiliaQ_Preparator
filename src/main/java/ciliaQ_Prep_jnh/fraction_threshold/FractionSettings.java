@@ -69,6 +69,8 @@ public class FractionSettings {
 
 	// ------------------------------------------------------------------ dialog
 
+	/** The wiki page of this method, the target of the dialog's Help button. */
+	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Fraction-thresholds-in-CiliaQ-Preparator";
 	/**
 	 * Secondary dialog, the same pattern CANNY 3D already uses. Opened only when one of the two methods
 	 * is selected.
@@ -76,21 +78,17 @@ public class FractionSettings {
 	public static FractionSettings initByGD(String task, boolean local) throws Exception {
 		FractionSettings inst = new FractionSettings();
 
-		GenericDialog gd = new GenericDialog(pluginName + " - fraction-of-range threshold");
+		GenericDialog gd = new GenericDialog(pluginName + " - version " + pluginVersion + " - fraction-of-range threshold");
 		gd.setInsets(0, 0, 0);
-		gd.addMessage((local ? LOCAL : GLOBAL) + " - version " + pluginVersion,
+		gd.addMessage((local ? LOCAL : GLOBAL),
 				ciliaQ_Prep_jnh.CiliaQPrepMain.HEADING_FONT);
 		gd.setInsets(10, 0, 0);
 		gd.addMessage("Settings for " + task,
 				ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT);
 		gd.setInsets(0, 0, 0);
-		gd.addMessage("Leave these at the defaults unless you have calibrated them for your data.",
-				ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
-		gd.setInsets(-5, 0, 0);
-		gd.addMessage("See https://github.com/hansenjn/CiliaQ_Preparator/wiki for how to calibrate them.",
-				ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
-		gd.setInsets(-5, 0, 0);
-		gd.addMessage("If your data is speckly, add the median filter before changing the fraction.",
+		gd.addMessage("Leave these at the defaults unless you have calibrated them for your data."
+				+ "\nClick Help button to see wiki explaining how to calibrate. If your data is"
+				+ "\nnoisy, add the median filter (main dialog) before changing the fraction.",
 				ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
 
 		gd.setInsets(10, 0, 0);
@@ -112,6 +110,7 @@ public class FractionSettings {
 			gd.addNumericField("Signal percentile", inst.signalPercentileGlobal, 2);
 		}
 
+		gd.addHelp(HELP_URL);
 		gd.showDialog();
 		if (gd.wasCanceled()) throw new Exception("Fraction threshold settings dialog cancelled");
 
