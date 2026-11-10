@@ -45,19 +45,22 @@ public class ExpansionSettings {
 	public String seedSource = SEED_RIDGE;
 	public String lowThrAlgorithm = "Triangle";
 	public double customLowThr = 0.0;
-	public int minPieceSize = 200;				// voxels; measured, see class comment
+	public int minPieceSize = 200;
 
 	/** Only used when seedSource is SEED_HIGH: the seed (core) threshold, given exactly as the low one. */
 	public String seedThrAlgorithm = "Otsu";
 	public double customSeedThr = 0.0;
 
-	/** Only used when seedSource is SEED_RIDGE - the two ridge parameters that matter for seeding. */
-	public double ridgeWidth = 2.0;
-	public double ridgeSensitivity = 1.0;
+	/** Only used when seedSource is SEED_RIDGE: the full ridge detection settings, as for RIDGE DETECTION. */
+	public ciliaQ_Prep_jnh.ridge_detection.RidgeSettings ridge = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
+
 
 	/** Only used when seedSource is SEED_SPOT. */
-	public double spotDiameter = 2.0;
-	public double spotSensitivity = 0.5;
+	public double spotDiameter = 5.0;
+	public double spotSensitivity = 500;
+	
+	/** The wiki page of the seed tool, the target of the dialog's Help button. */
+	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Expansion-from-seeds-in-CiliaQ-Preparator";
 
 	private ExpansionSettings() {
 		super();
@@ -75,21 +78,10 @@ public class ExpansionSettings {
 		return seedThrAlgorithm.equals(lowThrAlgorithms[0]);
 	}
 
-	/** Build the ridge settings for seeding from the two exposed parameters. */
+	/** The ridge settings for seeding: a copy, so that deriving the detector values for one image leaves the stored
+	 *  settings as the user set them. */
 	public ciliaQ_Prep_jnh.ridge_detection.RidgeSettings toRidgeSettings() {
-		ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs =
-				ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
-		rs.lineWidth = ridgeWidth;
-		rs.sensitivity = ridgeSensitivity;
-		
-		/*	Seeding keeps the classic z handling and no clean-up rules (no short pieces joined or dropped
-		 *	either), as before the z method and the rules existed; the seed dialog does not expose them yet (to be
-		 *	designed with the seed tool). */
-		rs.zMethod = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.Z_CLASSIC;
-		rs.branchRule = false;
-		rs.crossingRule = false;
-		rs.shortPieces = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_APART;
-		return rs;
+		return ridge.copy();
 	}
 
 	/** Build the spot settings for seeding from the two exposed parameters. */
@@ -104,9 +96,9 @@ public class ExpansionSettings {
 	// ------------------------------------------------------------------ dialog
 
 	/**
-	 * Note: Every seed parameter is shown at once rather than behind a second
-	 * dialog per source - three numbers is less friction than a dialog chain, and the irrelevant ones
-	 * are simply ignored, which the labels say.
+	 * Note: The high-core and spot parameters are shown at once rather than behind a second dialog.
+	 * Ridge seeds have the full ridge detection settings, so for them the ridge detection dialog
+	 * (with its advanced dialog) opens after this one.
 	 */
 	public static ExpansionSettings initByGD(String task) throws Exception {
 		ExpansionSettings inst = new ExpansionSettings();
@@ -142,9 +134,8 @@ public class ExpansionSettings {
 		gd.addMessage("--- Seed parameters (only the chosen source's are used) ---",
 				ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT);
 		gd.setInsets(0, 0, 0);
-		gd.addNumericField("Filament width for ridge seeds (px)", inst.ridgeWidth, 2);
-		gd.setInsets(0, 0, 0);
-		gd.addNumericField("Contrast sensitivity for ridge seeds", inst.ridgeSensitivity, 3);
+		gd.addMessage("Ridge seeds: the ridge detection settings open in the next dialog.",
+				ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
 		gd.setInsets(0, 0, 0);
 		gd.addChoice("Core threshold for high-intensity seeds", lowThrAlgorithms, inst.seedThrAlgorithm);
 		gd.setInsets(0, 0, 0);
@@ -155,6 +146,7 @@ public class ExpansionSettings {
 		gd.setInsets(0, 0, 0);
 		gd.addNumericField("Sensitivity for spot seeds (grey levels)", inst.spotSensitivity, 3);
 
+		gd.addHelp(HELP_URL);
 		gd.showDialog();
 		if (gd.wasCanceled()) throw new Exception("Expansion settings dialog cancelled");
 
@@ -162,28 +154,22 @@ public class ExpansionSettings {
 		inst.lowThrAlgorithm = gd.getNextChoice();
 		inst.customLowThr = gd.getNextNumber();
 		inst.minPieceSize = (int) Math.round(gd.getNextNumber());
-		inst.ridgeWidth = gd.getNextNumber();
-		inst.ridgeSensitivity = gd.getNextNumber();
 		inst.seedThrAlgorithm = gd.getNextChoice();
 		inst.customSeedThr = gd.getNextNumber();
 		inst.spotDiameter = gd.getNextNumber();
 		inst.spotSensitivity = gd.getNextNumber();
+		if (inst.seedSource.equals(SEED_RIDGE))		// Call the same dialog as RIDGE DETECTION
+			inst.ridge = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initByGD(task + ", ridge seeds");
 		return inst;
 	}
 
 	/**
-	 * @return a warning when the chosen seed source does not match the structure the other parameters
-	 * describe, or null. Cannot be done in the dialog for the same reason as the spot sensitivity
-	 * warning: nothing about the image is known there.
+	 * @return a warning when the minimum object size switches the split guard off, or null.
 	 */
-	public String seedSourceWarning() {
-		if (seedSource.equals(SEED_SPOT) && spotDiameter > 6.0)
-			return "expansion: spot seeds with an expected diameter of " + IJ.d2s(spotDiameter, 1)
-					+ " px - spot seeds are for punctate structures like basal bodies; on filaments a blob detector"
-					+ " fires repeatedly along the length (measured 6-29 seeds per object)";
+	public String minPieceSizeWarning() {
 		if (minPieceSize <= 0)
 			return "expansion: the minimum object size is " + minPieceSize + ", so the guard is off"
-					+ " - crossing objects will be split into slivers instead of being left whole";
+					+ " - crossing objects will be split instead of being left whole";
 		return null;
 	}
 
@@ -198,10 +184,12 @@ public class ExpansionSettings {
 			sb.append("		Manually selected threshold	").append(IJ.d2s(customLowThr, 4)).append("\n");
 		sb.append("		Minimum object size after splitting (voxels)	").append(minPieceSize).append("\n");
 		if (seedSource.equals(SEED_RIDGE)) {
-			sb.append("		Ridge seed - expected filament width (px)	")
-					.append(IJ.d2s(ridgeWidth, 2)).append("\n");
-			sb.append("		Ridge seed - contrast sensitivity	")
-					.append(IJ.d2s(ridgeSensitivity, 3)).append("\n");
+			/*	The full ridge settings, one level deeper, with the labels of RIDGE DETECTION, so the
+			 *	settings-file reader can read them with the same code. */
+			sb.append("		Ridge seed settings:\n");
+			for (String line : ridge.report().split("\n"))
+				if (line.startsWith("		"))
+					sb.append("	").append(line).append("\n");
 		} else if (seedSource.equals(SEED_HIGH)) {
 			sb.append("		High core seed - seed threshold	").append(seedThrAlgorithm).append("\n");
 			if (customValueForSeedThreshold())

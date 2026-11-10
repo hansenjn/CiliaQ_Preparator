@@ -35,9 +35,9 @@ public class SpotSettings {
 	static final String pluginVersion = CiliaQPrepMain.PLUGIN_VERSION;
 
 	/** Simple section. */
-	public double diameter = 2.0;			// pixels, expected object diameter
+	public double diameter = 5.0;			// pixels, expected object diameter
 	public double variation = 1.0;			// pixels, spread of diameters -> multi-scale range
-	public double sensitivity = 8.0;		// ABSOLUTE grey levels of prominence, never a percentage
+	public double sensitivity = 500.0;		// ABSOLUTE grey levels of prominence, never a percentage
 
 	/** Advanced section. */
 	public boolean autoMinIntensity = true;
@@ -72,43 +72,12 @@ public class SpotSettings {
 		if (hi - lo < 1e-6) return new double[] { centre };	// range collapsed -> a single scale
 		return new double[] { lo, 0.5 * (lo + hi), hi };	// three scales: low, mid, high
 	}
-
-	/**
-	 * Sensitivity default by bit depth. NOT usable from the dialog (no image is open at that point), so
-	 * this serves the macro path and any future preview.
-	 * 8-bit: ~0.5 (working range ~0.5-2). 16-bit: ~2.0 (~2-6; provisional).
-	 */
-	public static double defaultSensitivity(int bitDepth) {
-		return bitDepth > 8 ? 2.0 : 0.5;
-	}
-
-	/** The diameter the flat defaults above were calibrated at. */
-	public static final double REFERENCE_DIAMETER = 2.0;
-
-	/**
-	 * Sensitivity default corrected for the expected diameter.
-	 *
-	 * The DoG response is scale-normalised by sigma^2, so the same structure produces a response that
-	 * grows with the square of the sigma being searched. A single flat default therefore cannot be right
-	 * across a wide diameter range. This scales the default the same way the response does, so it is at
-	 * worst wrong by a constant factor rather than by sigma^2. It remains only a starting point.
-	 */
-	public static double defaultSensitivity(int bitDepth, double diameter) {
-		double sRef = REFERENCE_DIAMETER / (2.0 * FWHM);
-		double sHere = Math.max(0.4, diameter / (2.0 * FWHM));
-		double scale = (sHere / sRef) * (sHere / sRef);
-		return defaultSensitivity(bitDepth) * scale;
-	}
-
+	
 	// ------------------------------------------------------------------ dialog
 
-	/**
-	 * NOTE: no image information is available when this is initiated.
-	 * The per-channel settings dialogs run BEFORE any image is opened (`imp` is declared later
-	 * in CiliaQPrepMain than this call site), so the default cannot be chosen by bit depth.
-	 * The hint therefore states both values, and sensitivityWarning() is called from the processing
-	 * code once the real bit depth is known.
-	 */
+	/** The wiki page of spot detection, the target of the dialog's Help button. */
+	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Spot-detection-in-CiliaQ-Preparator";
+	
 	public static SpotSettings initByGD(String task) throws Exception {
 		SpotSettings inst = new SpotSettings();
 
@@ -119,9 +88,6 @@ public class SpotSettings {
 		gd.setInsets(10, 0, 0);
 		gd.addMessage("Settings for " + task, CiliaQPrepMain.SUB_HEADING_FONT);
 		gd.setInsets(0, 0, 0);
-		gd.addMessage("These defaults work for most data. Change them only if detection is visibly wrong.",
-				CiliaQPrepMain.INSTRUCTIONS_FONT);
-		gd.setInsets(-5, 0, 0);
 		gd.addMessage("Intended for PUNCTATE structures (basal bodies). For filaments use ridge detection.",
 				CiliaQPrepMain.INSTRUCTIONS_FONT);
 
@@ -130,13 +96,17 @@ public class SpotSettings {
 		gd.setInsets(0, 0, 0);
 		gd.addNumericField("Diameter variation (pixels)", inst.variation, 2);
 
-		gd.setInsets(10, 0, 0);
-		gd.addMessage("--- Advanced ---", CiliaQPrepMain.SUB_HEADING_FONT);
+		gd.setInsets(0, 0, 0);
+		gd.addMessage("Set diameter for your pixel size, then adjust sensitivity (see Help).",
+				CiliaQPrepMain.INSTRUCTIONS_FONT);
 		gd.setInsets(0, 0, 0);
 		gd.addNumericField("Sensitivity (grey levels)", inst.sensitivity, 3);
 		gd.setInsets(-3, 20, 0);
-		gd.addMessage("Absolute grey levels, NOT a percentage.",
+		gd.addMessage("Absolute grey levels. Higher sensitivity = stricter = fewer spots.",
 				CiliaQPrepMain.INSTRUCTIONS_FONT);
+
+		gd.setInsets(10, 0, 0);
+		gd.addMessage("--- Advanced ---", CiliaQPrepMain.SUB_HEADING_FONT);
 		gd.setInsets(0, 0, 0);
 		gd.addCheckbox("Auto minimum spot intensity", inst.autoMinIntensity);
 		gd.setInsets(0, 0, 0);
@@ -144,6 +114,7 @@ public class SpotSettings {
 		gd.setInsets(0, 0, 0);
 		gd.addNumericField("Scale ratio (1.6 approximates LoG)", inst.scaleRatio, 2);
 
+		gd.addHelp(HELP_URL);
 		gd.showDialog();
 		if (gd.wasCanceled()) throw new Exception("Spot detection settings dialog cancelled");
 
@@ -156,25 +127,20 @@ public class SpotSettings {
 		return inst;
 	}
 
-	/**
-	 * @return a warning when the sensitivity looks wrong for the image's actual bit depth, or null.
-	 * Exists because the dialog cannot know the bit depth (see initByGD).
-	 */
-	public String sensitivityWarning(int bitDepth) {
-		// Compare against the DIAMETER-CORRECTED default, not the flat one: judging against the flat
-		// default would misjudge large-diameter settings by the sigma^2 response factor.
-		double expected = defaultSensitivity(bitDepth, diameter);
-		if (sensitivity < expected / 10.0)
-			return "spot detection: sensitivity " + IJ.d2s(sensitivity, 3) + " is far below the value"
-					+ " expected for a " + bitDepth + "-bit image at diameter " + IJ.d2s(diameter, 2)
-					+ " (about " + IJ.d2s(expected, 3) + ") - expect many spurious spots";
-		if (sensitivity > expected * 10.0)
-			return "spot detection: sensitivity " + IJ.d2s(sensitivity, 3) + " is far above the value"
-					+ " expected for a " + bitDepth + "-bit image at diameter " + IJ.d2s(diameter, 2)
-					+ " (about " + IJ.d2s(expected, 3) + ") - expect few or no spots";
+	/** @return null when the settings can work, otherwise why not (without this the result is just empty or noise). */
+	public String rejectionReason() {
+		if (diameter <= 0.0)
+			return "spot detection: the expected diameter must be above 0 px (got " + IJ.d2s(diameter, 2) + ")";
+		if (variation < 0.0)
+			return "spot detection: the diameter variation must be 0 or above (got " + IJ.d2s(variation, 2) + ")";
+		if (sensitivity < 0.0)
+			return "spot detection: the sensitivity must be 0 or above (got " + IJ.d2s(sensitivity, 2) + ")";
+		if (scaleRatio <= 1.0)
+			return "spot detection: the scale ratio must be above 1 (got " + IJ.d2s(scaleRatio, 2)
+					+ ") - at 1 the two Gaussians cancel and nothing is found";
 		return null;
 	}
-
+	
 	// ------------------------------------------------------------------ reporting
 
 	public String report() {
@@ -191,6 +157,7 @@ public class SpotSettings {
 			sigmaList.append(IJ.d2s(sigmas[i], 4));
 		}
 		sb.append("		Sigmas searched	").append(sigmaList.toString()).append("\n");
+		sb.append("		Z consolidation	one spot per peak of the intensity profile through z\n");
 		sb.append("		Auto minimum spot intensity	").append(autoMinIntensity).append("\n");
 		if (!autoMinIntensity)
 			sb.append("		Minimum spot intensity (override)	").append(IJ.d2s(minIntensity, 4)).append("\n");

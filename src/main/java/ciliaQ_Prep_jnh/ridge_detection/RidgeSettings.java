@@ -1,10 +1,8 @@
 package ciliaQ_Prep_jnh.ridge_detection;
 
-import java.awt.AWTEvent;
 import java.util.Vector;
 
 import ij.gui.GenericDialog;
-import ij.gui.DialogListener;
 import ij.IJ;
 
 /**
@@ -36,8 +34,8 @@ import ij.IJ;
  * Fiji's own Ridge Detection plugin computes sigma and the thresholds inside its dialog listener. That
  * listener never fires in macro or headless mode, so a macro caller would silently receive unconverted
  * defaults. To avoid that, deriveFrom(...) is a plain method that the PROCESSING code calls
- * unconditionally; the dialog listener calls it only to refresh the greyed advanced fields for a user
- * who is editing interactively. Both paths therefore produce the same numbers.
+ * unconditionally; the advanced dialog only pre-fills its fields with the same formula on a 0-255 range,
+ * as a guide.
  *
  * ROUND-TRIP.
  * report() writes these settings into the _CQP.txt metadata file as tab-indented key/value lines, and
@@ -56,7 +54,7 @@ import ij.IJ;
  *
  * @author Jan N. Hansen
  */
-public class RidgeSettings {
+public class RidgeSettings implements Cloneable {
 
 	static final String pluginName = ciliaQ_Prep_jnh.CiliaQPrepMain.PLUGIN_NAME;
 	static final String pluginVersion = ciliaQ_Prep_jnh.CiliaQPrepMain.PLUGIN_VERSION;
@@ -211,23 +209,60 @@ public class RidgeSettings {
 	 * Fill in sigma / thresholds from the simple settings and the channel statistics.
 	 * MUST be called from the processing code, not only from the dialog, or macro runs get defaults.
 	 *
-	 * @param median			median of the channel, on the scope the user chose for stack processing
-	 * @param highPercentile	a high percentile of the same channel (p99.9 is what was calibrated)
+	 * The signal range is how far lines stand out from the median: up to p99.9 for bright lines, down to p0.1 for
+	 * dark lines. Then the derivation is the same for both, so a dark line on an inverted image gives exactly the
+	 * thresholds of the bright line on the original.
+	 *
+	 * @param median			median of the channel
+	 * @param lowPercentile		p0.1 of the same channel (used for dark lines)
+	 * @param highPercentile	p99.9 of the same channel (used for bright lines; what was calibrated)
 	 */
-	public void deriveFrom(double median, double highPercentile) {
+	public void deriveFrom(double median, double lowPercentile, double highPercentile) {
+		deriveFromRange(darkLine ? median - lowPercentile : highPercentile - median);
+	}
+
+	/** The derivation for a given signal range (the line contrast at sensitivity 1). */
+	void deriveFromRange(double signalRange) {
 		if (advancedOverride) return;
-		double signalRange = Math.max(0.0, highPercentile - median);
-		this.contrastHigh = sensitivity * signalRange;
+		this.contrastHigh = sensitivity * Math.max(0.0, signalRange);
 		this.contrastLow = LOW_TO_HIGH * this.contrastHigh;
 		this.sigma = sigmaForWidth(lineWidth);
-		double hUpper = darkLine ? (255.0 - contrastLow) : contrastHigh;
-		double hLower = darkLine ? (255.0 - contrastHigh) : contrastLow;
-		this.upperThreshold = thresholdForContrast(lineWidth, hUpper);
-		this.lowerThreshold = thresholdForContrast(lineWidth, hLower);
+		/*	No "255 - contrast" flip for dark lines (Fiji's dialog has one because users type absolute 8-bit grey values
+		 *	there). Here the contrast is a difference, and the detector compares the magnitude of the second derivative,
+		 *	which is the same for a dark and a bright line of equal contrast. */
+		this.upperThreshold = thresholdForContrast(lineWidth, contrastHigh);
+		this.lowerThreshold = thresholdForContrast(lineWidth, contrastLow);
 	}
 
 	/**
-	 * Refuse parameter combinations that cannot work.
+	 * The checks that need no image. CiliaQPrepMain.validateSettings runs them before processing starts, so an
+	 * impossible value stops the run before any image is opened; rejectionReason runs them again during processing.
+	 *
+	 * @return null when acceptable, otherwise the reason to report and abort with.
+	 */
+	public String settingsRejectionReason() {
+		if (lineWidth <= 0.0)
+			return "ridge detection: the expected filament width must be above 0 px (got " + IJ.d2s(lineWidth, 2) + ")";
+		if (!advancedOverride && sensitivity <= 0.0)
+			return "ridge detection: the contrast sensitivity must be above 0 (got " + IJ.d2s(sensitivity, 2)
+					+ ") - at 0 the derived threshold is 0 and the detector traces noise";
+		if (minLength < 0.0)
+			return "ridge detection: the minimum filament length must be 0 or above (got " + IJ.d2s(minLength, 1) + ")";
+		if (copyRule && copyRatio <= 1.0)
+			return "ridge detection: the copy brightness ratio must be above 1 (got " + IJ.d2s(copyRatio, 2) + ")";
+		if (kinkRule && (kinkAngle <= 0.0 || kinkAngle >= 180.0))
+			return "ridge detection: the kink angle must lie between 0 and 180 degrees (got " + IJ.d2s(kinkAngle, 1) + ")";
+		if (parallelRule && turnRelease && (turnAngle <= 0.0 || turnAngle >= 90.0 || turnTangent <= 0.0 || turnContinuity < 0.0 || turnContinuity > 1.0))
+			return "ridge detection: turn release needs an angle between 0 and 90 degrees, a tangent above 0 line widths"
+					+ " and a continuity between 0 and 1 (got " + IJ.d2s(turnAngle, 1) + ", " + IJ.d2s(turnTangent, 2) + ", " + IJ.d2s(turnContinuity, 2) + ")";
+		if (zProfileSmoothing < 0.0)
+			return "ridge detection: the z-profile smoothing must be 0 (automatic) or above (got " + IJ.d2s(zProfileSmoothing, 2) + ")";
+		return null;
+	}
+
+	/**
+	 * Refuse parameter combinations that cannot work for this channel: first the settings-only checks
+	 * (settingsRejectionReason), then the ones that need the channel's statistics.
 	 *
 	 * The contrast check is in CONTRAST units (which match MAD) and only applies when MAD > 0, because a
 	 * MAD-anchored guard is degenerate on background-free data (MAD = 0) and would never fire there. It
@@ -238,24 +273,17 @@ public class RidgeSettings {
 	 * @return null when acceptable, otherwise the reason to report and abort with.
 	 */
 	public String rejectionReason(double madOfChannel) {
+		String s = settingsRejectionReason();
+		if (s != null) return s;
 		if (upperThreshold <= 0.0)
 			return "ridge detection: derived upper threshold is 0 - increase 'contrast sensitivity' "
 					+ "or check that the channel carries signal";
-		if (copyRule && copyRatio <= 1.0)
-			return "ridge detection: the copy brightness ratio must be above 1 (got " + IJ.d2s(copyRatio, 2) + ")";
-		if (kinkRule && (kinkAngle <= 0.0 || kinkAngle >= 180.0))
-			return "ridge detection: the kink angle must lie between 0 and 180 degrees (got " + IJ.d2s(kinkAngle, 1) + ")";
-		if (parallelRule && turnRelease && (turnAngle <= 0.0 || turnAngle >= 90.0 || turnTangent <= 0.0 || turnContinuity < 0.0 || turnContinuity > 1.0))
-			return "ridge detection: turn release needs an angle between 0 and 90 degrees, a tangent above 0 line widths"
-					+ " and a continuity between 0 and 1 (got " + IJ.d2s(turnAngle, 1) + ", " + IJ.d2s(turnTangent, 2) + ", " + IJ.d2s(turnContinuity, 2) + ")";
-		if (zProfileSmoothing < 0.0)
-			return "ridge detection: the z-profile smoothing must be 0 (automatic) or above (got " + IJ.d2s(zProfileSmoothing, 2) + ")";
 		/*	New V0.2.1: only for derived thresholds. With the advanced values overridden, deriveFrom does not run, the contrast stays 0
 		 *	and this check refused every such run on a channel with noise (MAD > 0) - Jan's own sperm settings among them. */
 		if (!advancedOverride && madOfChannel > 0.0 && contrastHigh < 2.0 * madOfChannel)
 			return "ridge detection: the line contrast this would look for (" + IJ.d2s(contrastHigh, 2)
 					+ ") is below twice the channel noise level (" + IJ.d2s(2.0 * madOfChannel, 2)
-					+ ") - raise 'contrast sensitivity', or the detector will trace noise";
+					+ ") - raise 'contrast sensitivity', or the detector may trace noise";
 		return null;
 	}
 
@@ -264,6 +292,16 @@ public class RidgeSettings {
 	/** The wiki page behind the dialogs' Help button. */
 	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Ridge-detection-in-CiliaQ-Preparator";
 
+	/** Creates an independent copy (every field is a number, a boolean or a String). Used for the seed tool's
+	 *  ridge seeds, so deriving the detector values for one image does not change the stored settings. */
+	public RidgeSettings copy() {
+		try {
+			return (RidgeSettings) super.clone();
+		} catch (CloneNotSupportedException e) {
+			throw new IllegalStateException(e);
+		}
+	}
+	
 	/**
 	 * The ridge detection dialog. ImageJ's GenericDialog does not scroll, so the dialog is kept compact (two fields per
 	 * row, the rule switches as one checkbox row, help in one line per section and behind the Help button); the advanced
@@ -343,28 +381,27 @@ public class RidgeSettings {
 
 	/**
 	 * The second dialog: the advanced values. Sigma and the thresholds are pre-filled with what the simple settings
-	 * derive (on a 0-255 range, as a guide; processing derives them from each channel) and refresh when "Dark line"
-	 * changes; a value edited away from that counts as an override. Cancel keeps the defaults and goes on.
+	 * derive (on a 0-255 range, as a guide, the same for bright and dark lines; processing derives them from each
+	 * channel); a value edited away from that counts as an override. Cancel keeps the defaults and goes on.
 	 */
 	static void advancedByGD(final RidgeSettings inst) {
-		final RidgeSettings preview = derivedPreview(inst.lineWidth, inst.sensitivity, inst.darkLine);
+		final RidgeSettings preview = derivedPreview(inst.lineWidth, inst.sensitivity);
 		final GenericDialog gd = new GenericDialog(pluginName + " - ridge detection: advanced settings");
 		final java.awt.Font sub = ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT, help = ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT;
 		gd.setInsets(0, 0, 0);
 		gd.addMessage("--- Steger detector (derived from the simple settings; edit to override) ---", sub);
 		gd.addNumericField("Sigma", preview.sigma, 3);
-		final java.awt.TextField sigmaField = lastNumericField(gd);
 		gd.addToSameRow();
 		gd.addNumericField("Upper threshold", preview.upperThreshold, 3);
-		final java.awt.TextField upperField = lastNumericField(gd);
 		gd.addToSameRow();
 		gd.addNumericField("Lower threshold", preview.lowerThreshold, 3);
-		final java.awt.TextField lowerField = lastNumericField(gd);
+		gd.setInsets(0, 0, 0);
+		gd.addMessage("Editing any of these three fixes all three. The pre-filled values assume a 0-255 range; processing derives them per channel.",
+				help);
 		gd.addNumericField("Maximum filament length (px, 0 = unlimited)", inst.maxLength, 1);
 		gd.setInsets(5, 20, 0);
 		gd.addCheckboxGroup(1, 4, new String[] { "Dark line", "Correct position", "Estimate width", "Extend line" },
 				new boolean[] { inst.darkLine, inst.correctPosition, inst.estimateWidth, inst.extendLine });
-		final java.awt.Checkbox darkBox = gd.getCheckboxes() == null ? null : (java.awt.Checkbox) gd.getCheckboxes().get(0);
 		gd.setInsets(10, 0, 0);
 		gd.addMessage("--- In-focus and 3D ---", sub);
 		gd.addNumericField("Z-profile smoothing (px, 0 = automatic)", inst.zProfileSmoothing, 2);
@@ -377,22 +414,10 @@ public class RidgeSettings {
 		gd.addNumericField("Tangent (line widths)", inst.turnTangent, 1);
 		gd.addToSameRow();
 		gd.addNumericField("Continuity (0-1)", inst.turnContinuity, 2);
-		gd.addHelp(HELP_URL);
-		/* "Dark line" changes the derived thresholds: refresh the three fields (by reference, so field positions do not matter) */
-		gd.addDialogListener(new DialogListener() {
-			boolean lastDark = inst.darkLine;
-			public boolean dialogItemChanged(GenericDialog d, AWTEvent e) {
-				boolean dark = darkBox != null && darkBox.getState();
-				if (dark == lastDark) return true;
-				lastDark = dark;
-				RidgeSettings p = derivedPreview(inst.lineWidth, inst.sensitivity, dark);
-				if (sigmaField != null) sigmaField.setText(IJ.d2s(p.sigma, 3));
-				if (upperField != null) upperField.setText(IJ.d2s(p.upperThreshold, 3));
-				if (lowerField != null) lowerField.setText(IJ.d2s(p.lowerThreshold, 3));
-				return true;
-			}
-		});
+		
+		gd.addHelp(HELP_URL);		
 		gd.showDialog();
+		
 		if (gd.wasCanceled()) return;	// keep the defaults
 
 		double sigmaTyped = gd.getNextNumber(), upperTyped = gd.getNextNumber(), lowerTyped = gd.getNextNumber();
@@ -408,7 +433,7 @@ public class RidgeSettings {
 
 		/* An advanced value counts as an override only if it differs from what the simple settings derive, so a field that
 		 * was only pre-filled is not mistaken for one. */
-		RidgeSettings p = derivedPreview(inst.lineWidth, inst.sensitivity, inst.darkLine);
+		RidgeSettings p = derivedPreview(inst.lineWidth, inst.sensitivity);
 		if (Math.abs(sigmaTyped - p.sigma) > 1e-4 || Math.abs(upperTyped - p.upperThreshold) > 1e-4 || Math.abs(lowerTyped - p.lowerThreshold) > 1e-4) {
 			inst.advancedOverride = true;
 			inst.sigma = sigmaTyped;
@@ -417,24 +442,14 @@ public class RidgeSettings {
 		}
 	}
 
-	/** sigma and thresholds as the simple settings derive them on a 0-255 range (the dialogs' guide values) */
-	static RidgeSettings derivedPreview(double lineWidth, double sensitivity, boolean darkLine) {
+	/** sigma and thresholds as the simple settings derive them on a 0-255 range (the dialogs' guide values;
+	 *	the same for bright and dark lines) */
+	static RidgeSettings derivedPreview(double lineWidth, double sensitivity) {
 		RidgeSettings p = new RidgeSettings();
 		p.lineWidth = lineWidth;
 		p.sensitivity = sensitivity;
-		p.darkLine = darkLine;
-		p.deriveFrom(0.0, 255.0);
+		p.deriveFromRange(255.0);
 		return p;
-	}
-
-	/** the numeric field / checkbox just added to the dialog (null in a headless environment) */
-	static java.awt.TextField lastNumericField(GenericDialog gd) {
-		Vector<?> v = gd.getNumericFields();
-		return v == null || v.isEmpty() ? null : (java.awt.TextField) v.lastElement();
-	}
-	static java.awt.Checkbox lastCheckbox(GenericDialog gd) {
-		Vector<?> v = gd.getCheckboxes();
-		return v == null || v.isEmpty() ? null : (java.awt.Checkbox) v.lastElement();
 	}
 
 	// ------------------------------------------------------------------ reporting
@@ -471,12 +486,13 @@ public class RidgeSettings {
 			sb.append("		Sigma	").append(IJ.d2s(sigma, 4)).append("\n");
 			sb.append("		Upper threshold	").append(IJ.d2s(upperThreshold, 4)).append("\n");
 			sb.append("		Lower threshold	").append(IJ.d2s(lowerThreshold, 4)).append("\n");
-			sb.append("		High contrast	").append(IJ.d2s(contrastHigh, 3)).append("\n");
-			sb.append("		Low contrast	").append(IJ.d2s(contrastLow, 3)).append("\n");
+			if (!advancedOverride) {	// with overridden values deriveFrom does not run, so no contrast was used
+				sb.append("		High contrast	").append(IJ.d2s(contrastHigh, 3)).append("\n");
+				sb.append("		Low contrast	").append(IJ.d2s(contrastLow, 3)).append("\n");
+			}
 		} else {
 			sb.append("		Sigma / thresholds / contrasts	")
-					.append("derived from the image intensities of each channel during processing")
-					.append(" - see the effective values in the log for that channel\n");
+					.append("derived from the image intensities of each channel during processing\n");
 		}
 		sb.append("		Advanced values overridden by user	").append(advancedOverride).append("\n");
 		sb.append("		Dark line	").append(darkLine).append("\n");
