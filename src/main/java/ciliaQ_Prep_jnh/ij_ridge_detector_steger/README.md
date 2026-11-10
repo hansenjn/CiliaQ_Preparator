@@ -196,7 +196,7 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    nearly every plane. The buffer now has max(ceil(3 × 2.5 σ),
    2 (ceil(2.5 σ) + 1)) entries; from σ 0.7 up that is the old size, so the result is unchanged.
 
-12. Fixed a ** response-array reallocation bug** in the line-linking step (`Link.compute_contours`).
+12. Fixed a **response-array reallocation bug** in the line-linking step (`Link.compute_contours`).
   The original code self-assigned (`resp[o] = resp[o]`)
   into a freshly allocated array, silently zeroing all accumulated response values
   whenever a line exceeded the initial buffer size. Responses are now copied correctly.
@@ -241,8 +241,8 @@ Not a bug; the code comment now says why (`CiliaQ-MOD`, comment only).
 On 2026-10-29, we submitted a **pull request** (determinism fixes, https://github.com/thorstenwagner/ij-ridgedetection/pull/42)
 with the ordering/determinism changes listed under "Modifications made to the original" above.
 
-Modifications 8, 9 and 11 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1; that of 11
-is in the upstream code this copy was taken from. A second pull request waits until #42 is accepted — 
+Modifications 8, 9, 11 and 12 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1; those of 11
+and 12 are in the upstream code this copy was taken from. A second pull request waits until #42 is accepted, since
 the plugin is listed as unmaintained.
 
 ## Maintenance note
