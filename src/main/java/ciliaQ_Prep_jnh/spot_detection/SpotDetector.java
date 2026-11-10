@@ -141,37 +141,91 @@ public class SpotDetector {
 				spots.add(new Spot(x, y, z, response[z][y * W + x]));
 			}
 		}
+		
 		/*
 		 * Z-CONSOLIDATION. MaximumFinder is 2D and runs per slice, so one 3D object produces one spot per
 		 * slice it spans - inflating the count by the object's z extent. Merge spots that lie within one
-		 * expected diameter in xy and keep the strongest DoG response per cluster, i.e. the object's
-		 * in-focus slice (which also gives a meaningful z). Only matters for true z-stacks; a single
-		 * slice is unaffected.
+		 * expected diameter in xy and belong to the same peak of the intensity profile through z, and keep
+		 * the strongest DoG response per cluster, i.e. the object's in-focus slice (which also gives a
+		 * meaningful z). A single slice is unaffected.
 		 */
 		int beforeConsolidation = spots.size();
-		ArrayList<Spot> merged = consolidateAcrossSlices(spots, Math.max(2.0, st.diameter));
+		ArrayList<Spot> merged = consolidateAcrossSlices(spots, Math.max(2.0, st.diameter), channelImp, st.diameter / 4.0);
 		return new Result(merged, minInt, rejected, beforeConsolidation);
 	}
 
-	/** Greedy xy clustering across slices; keeps the strongest response per cluster. */
-	static ArrayList<Spot> consolidateAcrossSlices(ArrayList<Spot> spots, double radius) {
-		ArrayList<Spot> keep = new ArrayList<Spot>();
-		if (spots.isEmpty()) return keep;
-		// strongest first, so each cluster is founded by its best member
+	/**
+	 * Merge spots that belong to the same object across slices, keeping the strongest spot of each group.
+	 *
+	 * Two spots are merged when they lie within {@code radius} in xy AND their z intensity profiles climb to
+	 * the same peak (within one plane). A faint tail or axial side lobe of a bright spot therefore joins it,
+	 * while two spots stacked in z (e.g. basal bodies of cells above each other) stay separate.
+	 * The peak search is the one ridge detection uses:
+	 * {@link ciliaQ_Prep_jnh.ridge_detection.RidgeZ#climb(double[], int)}.
+	 *
+	 * @param spots        detected spots (any plane); not modified
+	 * @param radius       xy merge radius in pixels
+	 * @param channelImp   single-channel, single-frame stack the spots were found in
+	 * @param profileSigma xy Gaussian blur applied to each plane before reading the z profile (0 = none)
+	 * @return one spot per group, strongest first
+	 */
+	static ArrayList<Spot> consolidateAcrossSlices(ArrayList<Spot> spots, double radius, ImagePlus channelImp,
+			double profileSigma) {
+		ArrayList<Spot> keep = new ArrayList<Spot>();		// the result: one representative spot per group
+		
+		if (spots.isEmpty()) {
+			// nothing to merge
+			return keep;
+		}
+		
+		// Sort strongest first, so each group is founded by (and represented by) its brightest member.
 		Spot[] arr = spots.toArray(new Spot[0]);
 		Arrays.sort(arr, new java.util.Comparator<Spot>() {
 			public int compare(Spot a, Spot b) { return Float.compare(b.response, a.response); }
 		});
+		
+		final int D = channelImp.getStackSize(), W = channelImp.getWidth();		// D = number of planes, W = row length for pixel indexing
+		
+		int[] peak = new int[arr.length];		// the profile peak each spot's plane belongs to (stays all 0 for a single plane, so the peak test below always passes)
+		
+		if (D > 1) {
+			// Run only for multi-plane images
+			
+			// Smoothed copy of every plane. The blur averages a small xy neighbourhood, so the z profile read at one pixel is not dominated by single-pixel noise.
+			float[][] smooth = new float[D][];
+			for (int z = 0; z < D; z++) {
+				FloatProcessor fp = (FloatProcessor) channelImp.getStack().getProcessor(z + 1).convertToFloat().duplicate();	// act on float copy; the input image stays untouched
+				if (profileSigma > 0) {
+					fp.blurGaussian(profileSigma);
+				}
+				smooth[z] = (float[]) fp.getPixels();							// flat pixel array, index = y * W + x
+			}
+			
+			// For each spot: read the intensity at xy through all planes (create z profile), then climb from the spot's own plane to the peak that plane belongs to.
+			double[] f = new double[D];
+			for (int j = 0; j < arr.length; j++) {
+				for (int z = 0; z < D; z++) f[z] = Math.max(1e-3, smooth[z][arr[j].y * W + arr[j].x]);
+				peak[j] = ciliaQ_Prep_jnh.ridge_detection.RidgeZ.climb(f, arr[j].z);
+			}
+		}
+
+		// Grouping, strongest first.
 		boolean[] taken = new boolean[arr.length];
-		double r2 = radius * radius;
+		double r2 = radius * radius;	// compare squared distances, avoids sqrt
 		for (int i = 0; i < arr.length; i++) {
-			if (taken[i]) continue;
-			keep.add(arr[i]);
+			if (taken[i]) {
+				// already absorbed by a stronger spot
+				continue;
+			}
+			keep.add(arr[i]);							// i founds a new group and represents it
 			taken[i] = true;
-			for (int j = i + 1; j < arr.length; j++) {
+			for (int j = i + 1; j < arr.length; j++) {		// only weaker spots can be absorbed
 				if (taken[j]) continue;
 				double dx = arr[i].x - arr[j].x, dy = arr[i].y - arr[j].y;
-				if (dx * dx + dy * dy <= r2) taken[j] = true;
+				// absorb j if it is close in xy AND climbs to the same z peak (within one plane)
+				if (dx * dx + dy * dy <= r2 && Math.abs(peak[i] - peak[j]) <= 1) {
+					taken[j] = true;
+				}
 			}
 		}
 		return keep;
