@@ -11,8 +11,8 @@ import ij.gui.GenericDialog;
  * This code was retrieved from https://github.com/sRassmann/canny3d-thresholder, version v0.1.0,
  * and was adapted by 
  * @author Jan N. Hansen
- * to fit into the CiliaQ_Preparator.
- * Last modification: Sep 19, 2023. 
+ * to fit into the CiliaQ_Preparator and later revised.
+ * Last modification: Nov 11, 2026. 
  */
 public class ProcessSettings {	
 	static String pluginName = "Canny 3D Thresholder"; 
@@ -37,6 +37,9 @@ public class ProcessSettings {
 		super();
 	}
 
+	/** The wiki page of this method, the target of the dialog's Help button (New V0.2.1). */
+	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Canny-3D-in-CiliaQ-Preparator";
+
 	/**
 	 * Constructs new Object and triggers a GD for the user
 	 * 
@@ -60,7 +63,7 @@ public class ProcessSettings {
 		gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", thrAlgorithms, inst.highThrAlgorithm);
 		gd.setInsets(0,0,0);	gd.addNumericField("High threshold value (if custom value is chosen)", inst.highThr, 8);
 
-		// show Dialog-----------------------------------------------------------------
+		gd.addHelp(HELP_URL);
 		gd.showDialog();
 
 		// read and process variables--------------------------------------------------
