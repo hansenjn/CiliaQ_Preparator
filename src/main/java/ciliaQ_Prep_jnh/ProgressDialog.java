@@ -33,6 +33,8 @@ public class ProgressDialog extends javax.swing.JFrame implements ActionListener
 	private LinkedList<String> dataLeft = new LinkedList<>();
 	private LinkedList<String> dataRight = new LinkedList<>();
 	private LinkedList<String> notifications = new LinkedList<>();
+	private LinkedList<Integer> notificationTasks = new LinkedList<>(),
+			notificationTypes = new LinkedList<>();	// New V0.2.1: per message, see getNotes
 	
 	public boolean notificationsAvailable = false, errorsAvailable = false;
 	int task, tasks;
@@ -325,16 +327,36 @@ public class ProgressDialog extends javax.swing.JFrame implements ActionListener
 		}
 	}
 	
-	// New in v0.2.2 - throttle messages for speed up during heavy logging
-	public void notifyMessage(String message, int type){
+	// New in v0.2.0 - throttle messages for speed up during heavy logging
+	public synchronized void notifyMessage(String message, int type){	// V0.2.1: synchronized, see getNotes
+		message = ProgressReporter.withTask(message, task, tasks);		// V0.2.1: every message names its task
 		if(type == ProgressReporter.ERROR){
 			errorsAvailable = true;
 		}else if(type == ProgressReporter.NOTIFICATION){
 			notificationsAvailable = true;
 		}
 		notifications.addFirst(message);
+		notificationTasks.addFirst(task);	// New V0.2.1
+		notificationTypes.addFirst(type);	// New V0.2.1
 		scheduleNotificationUpdate();
 		if(type == ProgressReporter.ERROR)	forceUIUpdate();      // never throttle errors
+	}
+	
+	/**
+	 * New V0.2.1: see ProgressReporter.getNotes. The lists hold the newest message first, so they are read from the back.
+	 * synchronized: the ridge detection's watchdog reports from its own thread.
+	 */
+	public synchronized java.util.List<String> getNotes(int task){
+		java.util.ArrayList<String> notes = new java.util.ArrayList<String>();
+		java.util.Iterator<String> m = notifications.descendingIterator();
+		java.util.Iterator<Integer> t = notificationTasks.descendingIterator(), y = notificationTypes.descendingIterator();
+		while(m.hasNext()){
+			String message = m.next();
+			int messageTask = t.next(), type = y.next();
+			if(messageTask != task || type == ProgressReporter.LOG)	continue;
+			notes.add((type == ProgressReporter.ERROR ? "ERROR" : "WARNING") + "	" + message);
+		}
+		return notes;
 	}
 	
 	public void notifyMessageWithTaskNr(String message, int type){

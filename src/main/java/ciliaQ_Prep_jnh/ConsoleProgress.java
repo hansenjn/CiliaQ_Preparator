@@ -17,6 +17,8 @@ public class ConsoleProgress implements ProgressReporter {
 	private final int tasks;
 	private int task = 1;
 	private String lastText = "";
+	private final java.util.ArrayList<String> notes = new java.util.ArrayList<String>();		// New V0.2.1: "ERROR/WARNING<tab>message"
+	private final java.util.ArrayList<Integer> noteTasks = new java.util.ArrayList<Integer>();	// New V0.2.1: the task of each note
 
 	public ConsoleProgress(String [] taskList, int tasks) {
 		this.taskList = taskList == null ? new String [0] : taskList.clone();
@@ -45,7 +47,8 @@ public class ConsoleProgress implements ProgressReporter {
 		this.task = Math.min(task + 2, tasks);
 	}
 
-	public void notifyMessage(String message, int type) {
+	public synchronized void notifyMessage(String message, int type) {	// V0.2.1: synchronized, see getNotes
+		message = ProgressReporter.withTask(message, task, tasks);		// New V0.2.1: every message names its task
 		if (type == ERROR) {
 			errorsAvailable = true;
 			IJ.log("ERROR: " + message);
@@ -55,6 +58,19 @@ public class ConsoleProgress implements ProgressReporter {
 		} else {
 			IJ.log(message);
 		}
+		if (type != LOG) {	// New V0.2.1: kept for the report, see getNotes
+			notes.add((type == ERROR ? "ERROR" : "WARNING") + "	" + message);
+			noteTasks.add(task);
+		}
+	}
+	
+	/** New V0.2.1: see ProgressReporter.getNotes. synchronized: the ridge detection's watchdog reports from its own thread. */
+	public synchronized java.util.List<String> getNotes(int task) {
+		java.util.ArrayList<String> out = new java.util.ArrayList<String>();
+		for (int i = 0; i < notes.size(); i++) {
+			if (noteTasks.get(i) == task) out.add(notes.get(i));
+		}
+		return out;
 	}
 
 	public void setVisible(boolean visible) { /* nothing to show */ }

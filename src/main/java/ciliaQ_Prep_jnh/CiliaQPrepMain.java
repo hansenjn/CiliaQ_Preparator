@@ -746,12 +746,13 @@ public void run(String arg) {
 			TextCollector tp1 = new TextCollector("results");
 			addSettingsBlockToPanel(tp1,  startDate, name[task], totSeries[task]>1, series[task], imp);
 			
-			/*	V0.2.1: Report any unrecognised macro values now that there is somewhere visible to report them. */
+			/*	V0.2.1: Report any unrecognised macro values
+			 *	(the Log, as macro runs use ConsoleProgress, and the CQP.txt report's "Notes and errors").
+			 * */
 			if(macroWarnings != null && !macroWarnings.isEmpty()){
 				for(int w = 0; w < macroWarnings.size(); w++){
-					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": "
+					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": macro settings: "
 							+ macroWarnings.get(w), ProgressReporter.NOTIFICATION);
-					tp1.append("WARNING	macro settings:	" + macroWarnings.get(w));
 				}
 			}
 			
@@ -954,8 +955,8 @@ public void run(String arg) {
 		   				if(pwarn != null){
 		   					progress.notifyMessage("Channel " + channelIDs [c] + ": " + pwarn,
 		   							ProgressReporter.NOTIFICATION);
-		   					tp1.append("	WARNING	" + pwarn);
 		   				}
+		   				
 		   				/*
 		   				 * Normalise by the STACK maximum, not the type maximum and not the slice
 		   				 * maximum. exp(-q*mean) acts on a [0,1]-normalised image so the divisor changes
@@ -1009,7 +1010,6 @@ public void run(String arg) {
 		   				if(fwarn != null){
 		   					progress.notifyMessage("Channel " + channelIDs [c] + ": " + fwarn,
 		   							ProgressReporter.NOTIFICATION);
-		   					tp1.append("	WARNING	" + fwarn);
 		   				}
 		   				ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result [][] fres =
 		   						getFractionThresholds(tempImp, fractionSettings [c], localMethod,
@@ -1317,6 +1317,7 @@ public void run(String arg) {
 				procImp.close();
 		   	}
 		   	
+		   	appendNotes(tp1, task + 1);	// New V0.2.1: Write every NOTE and ERROR of this image, as shown during the run, into the txt file
 		   	addFooter(tp1, startDate);				
 			writeTextFile(filePrefix + ".txt", tp1.getText()); //tp1.saveAs(filePrefix + ".txt"); Switched to java-based writing to avoid macro notion
 
@@ -1561,7 +1562,7 @@ private boolean importSettings() {
 						line = br.readLine();
 						if(line == null){importProblem(settingsFile, "Reading problem with Gauss Sigma."); truncated = true; break reading;}
 						if(!line.contains("Gauss sigma:")) {
-							IJ.error("Gauss not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile,"Gauss not found in Canny settings - no preferences loading!");
 							return false;
 						}
 						tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1572,7 +1573,7 @@ private boolean importSettings() {
 						line = br.readLine();
 						if(line == null){importProblem(settingsFile, "Reading problem with Canny alpha."); truncated = true; break reading;}
 						if(!line.contains("Canny alpha:")) {
-							IJ.error("Alpha not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile,"Alpha not found in Canny settings - no preferences loading!");
 							return false;
 						}
 						tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1583,7 +1584,7 @@ private boolean importSettings() {
 						line = br.readLine();
 						if(line == null){importProblem(settingsFile, "Reading problem with low threshold method."); truncated = true; break reading;}
 						if(!line.contains("Low threshold method")) {
-							IJ.error("LowThr method not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile,"LowThr method not found in Canny settings - no preferences loading!");
 							return false;
 						}
 						
@@ -3151,6 +3152,24 @@ ImagePlus blurGaussian(ImagePlus imp, double radius) {
 	return outImp;	
 }
 
+/**
+ * New V0.2.1: writes the ERROR and NOTE messages of this image (ProgressReporter.getNotes) as the last section of its
+ * report, after every section importSettings reads channel settings from.
+ */
+private void appendNotes(TextCollector tp, int task){
+	java.util.List<String> notes = progress.getNotes(task);
+	if(notes.isEmpty())	return;
+	tp.append("");
+	tp.append("Notes and errors for this image (as shown in the progress window)");
+	for(int i = 0; i < notes.size(); i++){
+		String note = notes.get(i);
+		int tab = note.indexOf("	");
+		String line = note.substring(tab + 1).replaceFirst("^Task \\d+(/\\d+)?(, |: )", "").replace("\n", " ")
+				.replace("Segmented channel", "segmented channel").replace("Segmentation style", "segmentation style");
+		tp.append("	" + note.substring(0, tab) + "	" + line);
+	}
+}
+
 private void addFooter(TextCollector tp, Date currentDate){
 	tp.append("");
 	tp.append("Datafile was generated on " + FullDateFormatter2.format(currentDate) + " by '"
@@ -3461,23 +3480,6 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 				+ df3.format(pct) + "	" + origNonZero);
 		
 		/*
-		 * THRESHOLD HAD NO EFFECT. The input has a background of exactly 0, and the mask still kept every
-		 * non-zero voxel: the threshold sat below the lowest non-zero intensity, so it separated nothing,
-		 * and any other auto-threshold method below that value gives the identical mask. Typical for
-		 * exports rescaled from a low-bit source (e.g. Human Protein Atlas images).
-		 */
-		if(origNonZero > 0 && origNonZero < total && keptNonZero == origNonZero){
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
-				+ ": the segmentation kept every non-zero voxel of the input (" + origNonZero + "), so the"
-				+ " threshold separated nothing beyond the zero background. Another auto-threshold method"
-				+ " may give the same mask - evaluate the output and consider to refine preprocessing,"
-				+ " or use RIDGE or SPOT DETECTION instead.",
-				ProgressReporter.NOTIFICATION);
-			tp1.append("		WARNING	the segmentation kept every non-zero voxel of the input - the threshold"
-				+ " separated nothing beyond the zero background");
-		}
-
-		/*
 		 * ZERO-INTENSITY LOSS. Written for every channel that kept intensities, so the loss is visible
 		 * in the archived record.
 		 */
@@ -3493,9 +3495,7 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 					+ " written as 0. CiliaQ treats only voxels > 0 as foreground, so it will see a"
 					+ " smaller object than the segmentation found. This happens when a blur or another"
 					+ " filter extends the mask over background that is exactly 0. Choose a binary"
-					+ " segmentation style to keep them.", ProgressReporter.NOTIFICATION);
-				tp1.append("		WARNING	" + lost + " segmented voxels are written as 0 because their"
-						+ " original intensity is 0 - choose a binary segmentation style to keep them");
+					+ " segmentation style to keep them.", ProgressReporter.NOTIFICATION);	// V0.2.1: also into the report
 			}
 		}
 
@@ -3505,30 +3505,51 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 		if(origNonZero == 0){
 			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": channel " + channelIDs [c]
 				+ " of the input is entirely zero, so the segmented output is empty too."
-				+ " Check that the channel number is right.", ProgressReporter.NOTIFICATION);
-			tp1.append("	WARNING	channel " + channelIDs [c] + " of the input is entirely zero");
+				+ " Check that the channel number is right.", ProgressReporter.NOTIFICATION);	// V0.2.1: also into the report
 			continue;
 		}
 
-		/*	Only meaningful for the methods that actually apply an intensity threshold: the three
-		 *	label/detector methods select structures rather than thresholding, so "removed nothing" says
-		 *	nothing about them. */
+		/*	
+		 * V0.2.1
+		 * Alert about problems with thresholding methods (if any)
+		 * Give out one warning per channel.
+		 * */
 		boolean thresholdMethod = !(RIDGE_DETECTION.equals(chosenAlgorithms [c])
 				|| SPOT_DETECTION.equals(chosenAlgorithms [c])
 				|| EXPANSION_SEEDS.equals(chosenAlgorithms [c]));
-		if(thresholdMethod && fg == origNonZero){
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the threshold for channel "
-				+ channelIDs [c] + " removed 0 voxels - every non-zero voxel of the input passed it,"
-				+ " so the segmented channel is identical to the unsegmented one."
-				+ " The threshold is at or below the lowest non-zero intensity.",
-				ProgressReporter.NOTIFICATION);
-			tp1.append("	WARNING	the threshold removed 0 voxels - output identical to the input");
-		}else if(thresholdMethod && fg == 0){
+		long zeroBackground = total - origNonZero;
+		if(!thresholdMethod){
+			// nothing to say about a threshold
+		}else if(fg == 0){
 			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the threshold for channel "
 				+ channelIDs [c] + " removed EVERYTHING - no voxel passed it, so the segmented channel"
 				+ " is empty. The threshold is above the highest intensity.",
 				ProgressReporter.NOTIFICATION);
-			tp1.append("	WARNING	the threshold removed every voxel - output is empty");
+		}else if(keptNonZero == origNonZero && zeroBackground == 0){
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the threshold for channel "
+				+ channelIDs [c] + " removed 0 voxels - every voxel of the input passed it,"
+				+ " so the segmented channel is identical to the unsegmented one."
+				+ " The threshold is at or below the lowest intensity.",
+				ProgressReporter.NOTIFICATION);
+		}else if(keptNonZero == origNonZero && fg == total){
+			/*	Binary output with a threshold at or below 0: the zero background passes too (a voxel is removed only
+			 *	if value < threshold), so every voxel of the channel is set to the maximum. */
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
+				+ ": every voxel became foreground, also the " + zeroBackground + " voxels of the zero background -"
+				+ " the threshold is at or below 0, so it separated nothing. Evaluate the output and consider to"
+				+ " refine preprocessing, or use RIDGE or SPOT DETECTION instead.",
+				ProgressReporter.NOTIFICATION);
+		}else if(keptNonZero == origNonZero){
+			/*	THRESHOLD HAD NO EFFECT. The input has a background of exactly 0, and the mask still kept every
+			 *	non-zero voxel: the threshold sat below the lowest non-zero intensity, so it separated nothing,
+			 *	and any other auto-threshold method below that value gives the identical mask. Typical for
+			 *	exports rescaled from a low-bit source (e.g. Human Protein Atlas images). */
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
+				+ ": the segmentation kept every non-zero voxel of the input (" + origNonZero + "), so the"
+				+ " threshold separated nothing beyond the zero background. Another auto-threshold method"
+				+ " may give the same mask - evaluate the output and consider to refine preprocessing,"
+				+ " or use RIDGE or SPOT DETECTION instead.",
+				ProgressReporter.NOTIFICATION);
 		}
 	}
 	tp1.append("");
@@ -3621,8 +3642,7 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 
 	String warn = es.minPieceSizeWarning();
 	if(warn != null){
-		progress.notifyMessage("Channel " + channelWriteImp + ": " + warn, ProgressReporter.NOTIFICATION);
-		tp1.append("	WARNING	" + warn);
+		progress.notifyMessage("Channel " + channelWriteImp + ": " + warn, ProgressReporter.NOTIFICATION);	// V0.2.1: also into the report
 	}
 	if(keepIntensities){
 		progress.notifyMessage("Channel " + channelWriteImp + ": expansion writes a LABEL image, so"
@@ -3856,7 +3876,6 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 				+ ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.MAX_LABEL
 				+ " objects - label numbering wrapped, so some labels are DUPLICATED.",
 				ProgressReporter.NOTIFICATION);
-		tp1.append("	WARNING	label numbering wrapped - duplicated labels");
 	}
 
 	/*
