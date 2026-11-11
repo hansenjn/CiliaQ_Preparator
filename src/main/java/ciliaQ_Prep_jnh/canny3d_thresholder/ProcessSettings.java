@@ -1,6 +1,5 @@
 package ciliaQ_Prep_jnh.canny3d_thresholder;
 
-import java.awt.Font;
 import java.util.ArrayList;
 import ij.gui.GenericDialog;
 
@@ -12,7 +11,7 @@ import ij.gui.GenericDialog;
  * and was adapted by 
  * @author Jan N. Hansen
  * to fit into the CiliaQ_Preparator and later revised.
- * Last modification: Nov 11, 2026. 
+ * Last modification: v0.2.1, Nov 11, 2026. 
  */
 public class ProcessSettings {	
 	static String pluginName = "Canny 3D Thresholder"; 
@@ -49,14 +48,19 @@ public class ProcessSettings {
 	public static ProcessSettings initByGD(String Task) throws Exception {
 		ProcessSettings inst = new ProcessSettings(); // returned instance of ImageSetting class
 		GenericDialog gd = new GenericDialog(pluginName + " - Image Processing Settings");
-		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann), modified by J.N. Hansen (last mod.: Sep 19, 2023)",
-				ciliaQ_Prep_jnh.CiliaQPrepMain.HEADING_FONT);
-		gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + Task, ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT);
-		gd.setInsets(0,0,0);	gd.addMessage("Canny 3D Thresholder requires the installation of additional packages in your FIJI/ImageJ distribution.", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
-		gd.setInsets(-5,0,0);	gd.addMessage("Please read the paragraph Installation at:", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
-		gd.setInsets(-5,20,0);	gd.addMessage("https://github.com/sRassmann/canny3d-thresholder.", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
 		
-		gd.setInsets(0,0,0);	gd.addNumericField("Sigma for Gaussian blur (pixels)", inst.gaussSigma, 4);
+		gd.setInsets(0,0,0);
+		gd.addMessage(pluginName + " - Version " + pluginVersion + " (© 2020 Sebastian Rassmann),"
+				+ "\nmodified for " + ciliaQ_Prep_jnh.CiliaQPrepMain.PLUGIN_NAME + " (last mod.: v0.2.1)",
+				ciliaQ_Prep_jnh.CiliaQPrepMain.HEADING_FONT);
+		
+		gd.setInsets(5,0,0);
+		gd.addMessage("Insert processing settings for " + Task, ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT);
+		
+		gd.setInsets(5,0,0);
+		gd.addMessage("Click the help button for more guidance on how to use CANNY 3D.", ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
+		
+		gd.setInsets(5,0,0);	gd.addNumericField("Sigma for Gaussian blur (pixels)", inst.gaussSigma, 4);
 		gd.setInsets(0,0,0);	gd.addNumericField("Alpha (sensitivity for edge detection)", inst.cannyAlpha, 4);
 		gd.setInsets(0,0,0);	gd.addChoice("Select method for low threshold", thrAlgorithms, inst.lowThrAlgorithm);
 		gd.setInsets(0,0,0);	gd.addNumericField("Low threshold value (if custom value is chosen)", inst.lowThr, 8);

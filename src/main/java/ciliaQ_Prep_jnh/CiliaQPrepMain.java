@@ -186,6 +186,11 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	/**	Macro values that were not recognised, collected while reading and reported once the run starts, added in V0.2.1 */
 	java.util.ArrayList<String> macroWarnings;
 
+	/**	New V0.2.1: what validateSettings found, one short line per problem. ALL problems are collected and then shown
+	 *	together (showCheckResults), so one attempt shows every setting that needs changing. */
+	java.util.ArrayList<String> checkErrors = new java.util.ArrayList<String>();
+	java.util.ArrayList<String> checkWarnings = new java.util.ArrayList<String>();
+	
 	/**
 	 *	New from V0.2.1 on: Per-channel counters for the ZERO-INTENSITY LOSS warning.
 	 *	What this refers to:
@@ -226,19 +231,19 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	private static volatile boolean runInProgress = false;
 	
 public void run(String arg) {
-synchronized(CiliaQPrepMain.class){
-    if(runInProgress){
-        IJ.error(PLUGIN_NAME + " V" + PLUGIN_VERSION, "A " + PLUGIN_NAME + " run is already in progress in this Fiji."
-            + "\nPlease wait for it to finish before starting another or cancel and restart Fiji."
-            + "\nAlternatively, just duplicate your Fiji installation folder and start a completely independent, second Fiji"
-            + "\nto safely run multiple instances in parallel."
-            + "\n(Reason: Running two Preparators in the same Fiji could, e.g., make ridge-detection results non-reproducible,"
-            + "\nbecause the ridge detector keeps shared internal states.)");
-        return;
-    }
-    runInProgress = true;
-}
-try {	
+	synchronized(CiliaQPrepMain.class){
+		if(runInProgress){
+			IJ.error(PLUGIN_NAME + " V" + PLUGIN_VERSION, "A " + PLUGIN_NAME + " run is already in progress in this Fiji."
+				+ "\nPlease wait for it to finish before starting another or cancel and restart Fiji."
+				+ "\nAlternatively, just duplicate your Fiji installation folder and start a completely independent, second Fiji"
+				+ "\nto safely run multiple instances in parallel."
+				+ "\n(Reason: Running two Preparators in the same Fiji could, e.g., make ridge-detection results non-reproducible,"
+				+ "\nbecause the ridge detector keeps shared internal states.)");
+			return;
+		}
+		runInProgress = true;
+	}
+	try {	
 	
 	
 	//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
@@ -274,8 +279,8 @@ try {
 		//.setInsets(top, left, bottom)
 		gd.setInsets(0,0,0);	gd.addMessage(PLUGIN_NAME + ", Version " + PLUGIN_VERSION + ", \u00a9 2019-2026 JN Hansen", SUPER_HEADING_FONT);
 		gd.setInsets(5,0,0);	gd.addChoice("process ", taskVariant, selectedTaskVariant);
-		gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats.", INSTRUCTIONS_FONT);
-		gd.setInsets(0,0,0);	gd.addMessage("The BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", INSTRUCTIONS_FONT);
+		gd.setInsets(0,0,0);	gd.addMessage("The plugin processes .tif images or calls a BioFormats plugin to open different formats."
+				+ "\nThe BioFormats plugin is preinstalled in FIJI / can be manually installed to ImageJ.", INSTRUCTIONS_FONT);
 		
 		gd.setInsets(10,0,0);	gd.addChoice("Preferences: ", settingsMethod, selectedSettingsVariant);
 		gd.setInsets(0,0,0);	gd.addMessage("Note: you may only load preferences from CiliaQ Preparator version v0.0.6 or higher.", INSTRUCTIONS_FONT);
@@ -327,24 +332,6 @@ try {
 			 *	block of the seven. Channel order is what the user expects, and one loop cannot drift
 			 *	out of step with the dropdown the way seven copies can.
 			 */
-			cannySettings = new ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings [channelIDs.length];
-			ridgeSettings = new ciliaQ_Prep_jnh.ridge_detection.RidgeSettings [channelIDs.length];
-			spotSettings = new ciliaQ_Prep_jnh.spot_detection.SpotSettings [channelIDs.length];
-			expansionSettings = new ciliaQ_Prep_jnh.expansion.ExpansionSettings [channelIDs.length];
-			fractionSettings = new ciliaQ_Prep_jnh.fraction_threshold.FractionSettings [channelIDs.length];
-			phansalkarSettings = new ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings [channelIDs.length];
-			
-			/*
-			 *	Prefill settings for Hysteresis Threshold
-			 * */
-			customLowThr = new double [channelIDs.length];
-			customHighThr = new double [channelIDs.length];
-			chosenLowAlg = new String [channelIDs.length];
-			chosenHighAlg = new String [channelIDs.length];
-			
-			Arrays.fill(chosenLowAlg,"Triangle");
-			Arrays.fill(chosenHighAlg,"Otsu");
-						
 			for(int i = 0; i < channelIDs.length; i++){
 				String task = "channel " + (i+1) + " with channel nr " + channelIDs [i];
 				String alg = chosenAlgorithms [i];
@@ -363,22 +350,25 @@ try {
 					}else if(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(alg)){
 						phansalkarSettings [i] = ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.initByGD(task);
 					}else if("HYSTERESIS threshold".equals(alg)){
-						/*	The only method that is initialized through a settings class,
-						 *	it fills four parallel arrays rather. */
+						/*	The only method NOT initialised through a settings class:
+						 *	it fills four parallel arrays instead. */
 						if(!requestHysteresisPrefs(task, i)){
 							if(record) Recorder.record = true;	// restore recorder before aborting
 							return;
 						}
 					}
 				} catch (Exception e) {
+					/*	Changed V0.2.1: every settings dialog throws an exception when it is cancelled ("... cancelled", Canny
+					 *	"GD canceled by user") - that stays silent. Anything else was a real failure that ended the run
+					 *	without a word; now it is shown. */
+					if(e.getMessage() == null || !e.getMessage().toLowerCase().contains("cancel")){
+						IJ.error(PLUGIN_NAME, "The settings dialog for " + task + " failed:\n" + e);
+					}
 					if(record) Recorder.record = true;	// restore recorder before aborting
 					return;
 				}
 			}
-			
-			
 		}else if(!importSettings()) {
-			IJ.error("Preferences could not be loaded due to file error...");
 			if(record) Recorder.record = true;	// restore recorder before aborting
 			return;
 		}
@@ -398,9 +388,9 @@ try {
 
 	if(record){
 		Recorder.record = true;
-	    if(Recorder.getInstance() != null){
-	        Recorder.setCommand(null);   // cancel ImageJ's auto-recorded menu command
-	    }
+		if(Recorder.getInstance() != null){
+			Recorder.setCommand(null);   // cancel ImageJ's auto-recorded menu command
+		}
 		Recorder.recordString("run(\"" + PLUGIN_NAME + " v" + PLUGIN_VERSION + "\", \"" + createRecordString() + "\");\n");
 	}
 	
@@ -535,7 +525,7 @@ try {
 //	String filesList = "Files to process:\n";
 	if(selectedTaskVariant.equals(taskVariant[1])){
 		for(int i = tasks-1; i >= 0; i--){
-			IJ.showProgress((tasks-i)/tasks);
+			IJ.showProgress((double)(tasks-i)/tasks);
 			try {
 				bfOptions = new ImporterOptions();
 				bfOptions.setId(""+dir[i]+name[i]+"");
@@ -1356,8 +1346,26 @@ try {
 	}	
 } finally {
 	//set safeguard for dual runs off
-    runInProgress = false;
+	runInProgress = false;
 }
+}
+
+/**
+ * New V0.2.1: the ONE message for a settings file that cannot be loaded. Every problem importSettings finds stops the
+ * loading, so a file never gives more than one; the message names the file, which the messages before did not.
+ */
+private void importProblem(File settingsFile, String problem){
+	IJ.error(PLUGIN_NAME + " - settings file", "The settings could not be loaded from\n" + settingsFile.getPath()
+		+ "\n \n" + problem);
+}
+
+/**
+ * New V0.2.1: the lines importSettings writes for every setting it reads (about 30 per file) go to the Log only in
+ * ImageJ's debug mode (Edit > Options > Misc..., in a macro setOption("DebugMode", true)). They are for finding a
+ * reading problem; for everyone else one summary line at the end of importSettings says what was loaded.
+ */
+private void logImport(String line){
+	if(IJ.debugMode)	IJ.log(line);
 }
 
 /**
@@ -1401,7 +1409,7 @@ private boolean importSettings() {
 	}
 
 	//read general settings
-	IJ.log("READING PREFERENCES:");
+	logImport("READING PREFERENCES:");
 	nChannels = 0;
 	try {
 		FileReader fr = new FileReader(settingsFile);
@@ -1426,7 +1434,7 @@ private boolean importSettings() {
 				if(chosenImageStyle.equals(intensityVariant [0])){
 					keepIntensities = true;
 				}
-				IJ.log("Segmentation style = " + chosenImageStyle);
+				logImport("Segmentation style = " + chosenImageStyle);
 			}
 			
 			if(line.contains("Segmented channel")) {
@@ -1436,7 +1444,7 @@ private boolean importSettings() {
 		br.close();
 		fr.close();
 	}catch (IOException e) {
-		IJ.error("Problem with loading preferences");
+		importProblem(settingsFile, "Problem with loading preferences");
 		e.printStackTrace();
 		return false;
 	}
@@ -1444,6 +1452,12 @@ private boolean importSettings() {
 	
 	// initialize for nr of channels (switch to new void method in V0.2.0)
 	initChannelArrays(nChannels);
+	
+	/*	New V0.2.1: set where the file ends in the middle of a method's settings ("Reading problem with ..."). Those places
+	 *	leave the loop with break reading, and the method then went on to return true - so the run started with the
+	 *	settings read so far and DEFAULTS for the rest, e.g. a Canny channel cut off after its Gauss sigma ran with the
+	 *	default alpha and thresholds. With the flag, such a file is refused after the loop. */
+	boolean truncated = false;
 	
 	//read individual channel settings
 	boolean channelReading = false;
@@ -1487,65 +1501,65 @@ private boolean importSettings() {
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					channelIDs [actualC] = Integer.parseInt(tempString);
-					IJ.log("C" + actualC + ": channel nr = " + channelIDs [actualC]);
+					logImport("C" + actualC + ": channel nr = " + channelIDs [actualC]);
 				}
 				if(line.contains("Channel duplicated to include a copy of the channel that is not segmented.")){
 					includeDuplicateChannel [actualC] = true;
-					IJ.log("C" + actualC + ": duplicate C");
+					logImport("C" + actualC + ": duplicate C");
 				}
 				if(line.contains("Median filter before blurring")){ // New in V0.2.1
 					medianFilter [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					medianRadius [actualC] = Double.parseDouble(tempString);
-					IJ.log("C" + actualC + ": median rad = " + medianRadius [actualC]);
+					logImport("C" + actualC + ": median rad = " + medianRadius [actualC]);
 				}
 				if(line.contains("Gaussian blur before background removal")){
 					preBlur [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					preBlurRadius [actualC] = Double.parseDouble(tempString);
-					IJ.log("C" + actualC + ": pre-blur rad = " + preBlurRadius [actualC]);
+					logImport("C" + actualC + ": pre-blur rad = " + preBlurRadius [actualC]);
 				}
 				if(line.contains("Subtract Background:")){
 					subtractBackground [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					subtractBGRadius [actualC] = Double.parseDouble(tempString);
-					IJ.log("C" + actualC + ": sbg rad = " + subtractBGRadius [actualC]);
+					logImport("C" + actualC + ": sbg rad = " + subtractBGRadius [actualC]);
 				}
 				if(line.contains("Divide By Background:")){
 					divideBackground [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					divideBGRadius [actualC] = Double.parseDouble(tempString);
-					IJ.log("C" + actualC + ": dbg rad = " + divideBGRadius [actualC]);
+					logImport("C" + actualC + ": dbg rad = " + divideBGRadius [actualC]);
 				}
 				if(line.contains("Additional blur with Gaussian")){
 					additionalBlur [actualC] = true;
 					tempString = line.substring(line.lastIndexOf("	")+1);
 					if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 					additionalBlurRadius [actualC] = Double.parseDouble(tempString);
-					IJ.log("C" + actualC + ": blur rad = " + additionalBlurRadius [actualC]);
+					logImport("C" + actualC + ": blur rad = " + additionalBlurRadius [actualC]);
 				}
 				if(line.contains("Every time step separately segmented.")) {
 					separateTimesteps [actualC]= true;
-					IJ.log("C" + actualC + ": time steps separately");
+					logImport("C" + actualC + ": time steps separately");
 				}
 				if(line.contains("Stack processing:")){	// New V0.2.1: methods whose block precedes this line (EXPANSION, FRACTION)
 					String sm = matchStackMethod(line);
 					if(sm != null)	chosenStackMethods [actualC] = sm;
-					IJ.log("C" + actualC + ": stack m " + chosenStackMethods [actualC]);
+					logImport("C" + actualC + ": stack m " + chosenStackMethods [actualC]);
 				}
 				
 				if(line.contains("Segmentation method:")){
 					if(line.contains("Canny 3D Thresholder")) {
 						chosenAlgorithms [actualC] = algorithm [17];
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
 						
 						cannySettings [actualC] = ProcessSettings.initDefault();
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem with Gauss Sigma."); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with Gauss Sigma."); truncated = true; break reading;}
 						if(!line.contains("Gauss sigma:")) {
 							IJ.error("Gauss not found in Canny settings - no preferences loading!");
 							return false;
@@ -1553,10 +1567,10 @@ private boolean importSettings() {
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						cannySettings [actualC].setGaussSigma(Double.parseDouble(tempString));
-						IJ.log("C" + actualC + ": Gauss " + cannySettings [actualC].getGaussSigma());
+						logImport("C" + actualC + ": Gauss " + cannySettings [actualC].getGaussSigma());
 						
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem with Canny alpha."); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with Canny alpha."); truncated = true; break reading;}
 						if(!line.contains("Canny alpha:")) {
 							IJ.error("Alpha not found in Canny settings - no preferences loading!");
 							return false;
@@ -1564,10 +1578,10 @@ private boolean importSettings() {
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						cannySettings [actualC].setCannyAlpha(Double.parseDouble(tempString));
-						IJ.log("C" + actualC + ": Alpha " + cannySettings [actualC].getCannyAlpha());
+						logImport("C" + actualC + ": Alpha " + cannySettings [actualC].getCannyAlpha());
 						
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem with low threshold method."); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with low threshold method."); truncated = true; break reading;}
 						if(!line.contains("Low threshold method")) {
 							IJ.error("LowThr method not found in Canny settings - no preferences loading!");
 							return false;
@@ -1584,21 +1598,21 @@ private boolean importSettings() {
 						
 						if(cannySettings [actualC].getLowThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){IJ.error("Reading problem with manually selected low threshold."); break reading;}
+							if(line == null){importProblem(settingsFile, "Reading problem with manually selected low threshold."); truncated = true; break reading;}
 							if(!line.contains("Manually selected low threshold:")){
-								IJ.error("Could not find manual lowThr in Canny settings - no preferences loaded!");
+								importProblem(settingsFile, "Could not find manual lowThr in Canny settings - no preferences loaded!");
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							cannySettings [actualC].setLowThr(Double.parseDouble(tempString));
 						}
-						IJ.log("C" + actualC + ": low Thr " + cannySettings [actualC].getLowThresholdAlgorithm());
+						logImport("C" + actualC + ": low Thr " + cannySettings [actualC].getLowThresholdAlgorithm());
 						
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem with high threshold method."); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with high threshold method."); truncated = true; break reading;}
 						if(!line.contains("High threshold method")) {
-							IJ.error("HiThr method not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile, "HiThr method not found in Canny settings - no preferences loading!");
 							return false;
 						}
 
@@ -1613,25 +1627,25 @@ private boolean importSettings() {
 						
 						if(cannySettings [actualC].getHighThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){IJ.error("Reading problem with manually selected high threshold."); break reading;}
+							if(line == null){importProblem(settingsFile, "Reading problem with manually selected high threshold."); truncated = true; break reading;}
 							if(!line.contains("Manually selected high threshold:")){
-								IJ.error("Could not find manual highThr in Canny settings - no preferences loaded!");
+								importProblem(settingsFile, "Could not find manual highThr in Canny settings - no preferences loaded!");
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							cannySettings [actualC].setHighThr(Double.parseDouble(tempString));
 						}
-						IJ.log("C" + actualC + ": High Thr " + cannySettings [actualC].getHighThresholdAlgorithm());
+						logImport("C" + actualC + ": High Thr " + cannySettings [actualC].getHighThresholdAlgorithm());
 						
 					}else if(line.contains("HYSTERESIS threshold")) {
 						chosenAlgorithms [actualC] = algorithm [19];
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
 						
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem"); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem"); truncated = true; break reading;}
 						if(!line.contains("Low threshold method")) {
-							IJ.error("LowThr method not found in Hysteresis settings - no preferences loading!");
+							importProblem(settingsFile, "LowThr method not found in Hysteresis settings - no preferences loading!");
 							return false;
 						}
 						
@@ -1644,24 +1658,24 @@ private boolean importSettings() {
 							}
 						}
 						
-						IJ.log("C" + actualC + ": Low Thr method" + chosenLowAlg [actualC]);
+						logImport("C" + actualC + ": Low Thr method" + chosenLowAlg [actualC]);
 						if(chosenLowAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){IJ.error("Reading problem with manually selected low threshold."); break reading;}
+							if(line == null){importProblem(settingsFile, "Reading problem with manually selected low threshold."); truncated = true; break reading;}
 							if(!line.contains("Manually selected low threshold:")){
-								IJ.error("Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
+								importProblem(settingsFile, "Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							customLowThr [actualC] = (Double.parseDouble(tempString));
-							IJ.log("C" + actualC + ": Low Thr " + customLowThr [actualC]);
+							logImport("C" + actualC + ": Low Thr " + customLowThr [actualC]);
 						}
 						
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem with high threshold method."); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with high threshold method."); truncated = true; break reading;}
 						if(!line.contains("High threshold method")) {
-							IJ.error("HiThr method not found in Hysteresis settings - no preferences loading!");
+							importProblem(settingsFile, "HiThr method not found in Hysteresis settings - no preferences loading!");
 							return false;
 						}
 						
@@ -1674,41 +1688,41 @@ private boolean importSettings() {
 							}
 						}
 						
-						IJ.log("C" + actualC + ": High Thr method" + chosenHighAlg [actualC]);
+						logImport("C" + actualC + ": High Thr method" + chosenHighAlg [actualC]);
 						if(chosenHighAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){IJ.error("Reading problem with manually selected high threshold."); break reading;}
+							if(line == null){importProblem(settingsFile, "Reading problem with manually selected high threshold."); truncated = true; break reading;}
 							if(!line.contains("Manually selected high threshold:")){
-								IJ.error("Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
+								importProblem(settingsFile, "Could not find manual highThr in Hysteresis settings - no preferences loaded!");
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
 							if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 							customHighThr [actualC] = (Double.parseDouble(tempString));
-							IJ.log("C" + actualC + ": High Thr " + customHighThr [actualC]);
+							logImport("C" + actualC + ": High Thr " + customHighThr [actualC]);
 						}
 						
 						if(chosenHighAlg [actualC].equals(hystAlgorithms[0]) && chosenLowAlg [actualC].equals(hystAlgorithms[0])){
 							
 						}else {
 							line = br.readLine();	
-							if(line == null){IJ.error("Reading problem with stack method"); break reading;}
+							if(line == null){importProblem(settingsFile, "Reading problem with stack method"); truncated = true; break reading;}
 							String smMatch = matchStackMethod(line);
 							if(smMatch != null)	chosenStackMethods [actualC] = smMatch;
-							IJ.log("C" + actualC + ": stack m " + chosenStackMethods [actualC]);	
+							logImport("C" + actualC + ": stack m " + chosenStackMethods [actualC]);	
 						}
 					}else if(line.contains("CUSTOM threshold")) {
 						chosenAlgorithms [actualC] = algorithm [18];
 						line = br.readLine();
-						if(line == null){IJ.error("Reading problem with CUSTOM threshold value"); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with CUSTOM threshold value"); truncated = true; break reading;}
 						if(!line.contains("Custom threshold value:")){
-							IJ.error("Could not find custom threshold value in settings - no preferences loaded!");
+							importProblem(settingsFile, "Could not find custom threshold value in settings - no preferences loaded!");
 							return false;
 						}
 						tempString = line.substring(line.lastIndexOf("	")+1);
 						if(tempString.contains(",") && !tempString.contains("."))	tempString = tempString.replace(",", ".");
 						customThr [actualC] = Double.parseDouble(tempString);
-						IJ.log("C" + actualC + ": custom thr" + customThr [actualC]);
+						logImport("C" + actualC + ": custom thr" + customThr [actualC]);
 					}else if(line.contains("applying intensity threshold based ")) {
 						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
 						int s = line.indexOf("based on the ");
@@ -1722,16 +1736,16 @@ private boolean importSettings() {
 								}
 							}
 						}
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
 						
 						line = br.readLine();	
-						if(line == null){IJ.error("Reading problem with stack method."); break reading;}
+						if(line == null){importProblem(settingsFile, "Reading problem with stack method."); truncated = true; break reading;}
 						String smMatch2 = matchStackMethod(line);
 						if(smMatch2 != null)	chosenStackMethods [actualC] = smMatch2;
-						IJ.log("C" + actualC + ": stack m " + chosenStackMethods [actualC]);
+						logImport("C" + actualC + ": stack m " + chosenStackMethods [actualC]);
 					}else if(line.contains(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME)) {
 						chosenAlgorithms [actualC] = ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME;
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
 						phansalkarSettings [actualC] =
 								ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.initDefault();
 						java.util.HashMap<String,String> kv = readIndentedBlock(br);
@@ -1741,7 +1755,7 @@ private boolean importSettings() {
 						ps.r = blockDouble(kv, "Constant r", ps.r);
 						ps.p = blockDouble(kv, "Constant p", ps.p);
 						ps.q = blockDouble(kv, "Constant q", ps.q);
-						IJ.log("C" + actualC + ": phansalkar radius=" + ps.radius + " k=" + ps.k);
+						logImport("C" + actualC + ": phansalkar radius=" + ps.radius + " k=" + ps.k);
 					}else if(line.contains(ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.LOCAL)
 							|| line.contains(ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.GLOBAL)) {
 						/*	LOCAL IS TESTED FIRST because its name CONTAINS the global one:
@@ -1752,7 +1766,7 @@ private boolean importSettings() {
 						chosenAlgorithms [actualC] = loc
 								? ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.LOCAL
 								: ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.GLOBAL;
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
 						fractionSettings [actualC] =
 								ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.initDefault();
 						java.util.HashMap<String,String> kv = readIndentedBlock(br);
@@ -1769,23 +1783,23 @@ private boolean importSettings() {
 									fs.signalPercentileGlobal);
 						}
 						fs.bgPercentile = blockDouble(kv, "Background percentile", fs.bgPercentile);
-						IJ.log("C" + actualC + ": fraction f=" + (loc ? fs.fLocal : fs.fGlobal)
+						logImport("C" + actualC + ": fraction f=" + (loc ? fs.fLocal : fs.fGlobal)
 								+ " tile=" + fs.tileSize + " bgP=" + fs.bgPercentile);
 					}else if(line.contains(RIDGE_DETECTION)) {
 						chosenAlgorithms[actualC] = RIDGE_DETECTION;
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms[actualC]);
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms[actualC]);
 						ridgeSettings[actualC] = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
 						java.util.HashMap<String, String> kv = readIndentedBlock(br);
 						ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = ridgeSettings[actualC];
 						readRidgeBlock(kv, rs);	// New V0.2.1: shared with the seed tool
-						IJ.log("C" + actualC + ": ridge w=" + rs.lineWidth + " sens=" + rs.sensitivity
+						logImport("C" + actualC + ": ridge w=" + rs.lineWidth + " sens=" + rs.sensitivity
 								+ " minLen=" + rs.minLength + " override=" + rs.advancedOverride
 								+ " z=" + rs.zMethodToken() + " copy=" + rs.copyRule + " kink=" + rs.kinkRule
 								+ " branch=" + rs.branchRule + " shortPieces=" + rs.shortPiecesToken() + " crossing=" + rs.crossingRule
 								+ " parallel=" + rs.parallelRule + " turnRelease=" + rs.turnRelease);
 					}else if(line.contains("EXPANSION from seeds")) {
 						chosenAlgorithms [actualC] = EXPANSION_SEEDS;
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
 						expansionSettings [actualC] =
 								ciliaQ_Prep_jnh.expansion.ExpansionSettings.initDefault();
 						java.util.HashMap<String,String> kv = readIndentedBlock(br);
@@ -1813,14 +1827,14 @@ private boolean importSettings() {
 								es.customSeedThr);
 						es.spotDiameter = blockDouble(kv, "Spot seed - expected diameter", es.spotDiameter);
 						es.spotSensitivity = blockDouble(kv, "Spot seed - sensitivity", es.spotSensitivity);
-						IJ.log("C" + actualC + ": expansion seeds=" + es.seedSource + " low="
+						logImport("C" + actualC + ": expansion seeds=" + es.seedSource + " low="
 								+ es.lowThrAlgorithm + " minPiece=" + es.minPieceSize
 								+ (es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE)
 										? " ridge w=" + es.ridge.lineWidth + " sens=" + es.ridge.sensitivity
 												+ " z=" + es.ridge.zMethodToken() + " shortPieces=" + es.ridge.shortPiecesToken() : ""));
 					}else if(line.contains("SPOT DETECTION")) {
 						chosenAlgorithms [actualC] = SPOT_DETECTION;
-						IJ.log("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
 						spotSettings [actualC] = ciliaQ_Prep_jnh.spot_detection.SpotSettings.initDefault();
 						java.util.HashMap<String,String> kv = readIndentedBlock(br);
 						ciliaQ_Prep_jnh.spot_detection.SpotSettings ss = spotSettings [actualC];
@@ -1832,7 +1846,7 @@ private boolean importSettings() {
 						if(!ss.autoMinIntensity){
 							ss.minIntensity = blockDouble(kv, "Minimum spot intensity", ss.minIntensity);
 						}
-						IJ.log("C" + actualC + ": spot d=" + ss.diameter + " var=" + ss.variation
+						logImport("C" + actualC + ": spot d=" + ss.diameter + " var=" + ss.variation
 								+ " sens=" + ss.sensitivity + " autoMin=" + ss.autoMinIntensity);
 					}else{
 						/*	Previously an unrecognised method line fell through in silence and the
@@ -1929,7 +1943,7 @@ private boolean importSettings() {
 										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + version.toLowerCase() + " and manually installed to your FIJI/ImageJ."
 										+ "\nRead more about the bug at the release notes of CiliaQ Preparator version V0.1.2:"
 										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2");
-								IJ.error("CiliaQ_Preparator cannot import this setting since it is from an older CiliaQ Preparator version (" + version + ") and running"
+								importProblem(settingsFile, "CiliaQ_Preparator cannot import this setting since it is from an older CiliaQ Preparator version (" + version + ") and running"
 										+ "\nCiliaQ_Preparator version " + version + " with this setting was affected by a bug that has been fixed in version V0.1.2."
 										+ "\nYou may only reproduce this setting by running your file in CiliaQ Preparator version " + version + ", which can be downloaded at"
 										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + version.toLowerCase() + " and manually installed to your FIJI/ImageJ."
@@ -1955,13 +1969,25 @@ private boolean importSettings() {
 		}					
 		br.close();
 		fr.close();
+		if(truncated){
+			return false;	// New V0.2.1: importProblem has said where the file ends (see the flag)
+		}
 	}catch (Exception e) {
-		IJ.error("Problem with loading preferences (possibly a malformed or truncated settings file).");
+		importProblem(settingsFile, "Problem with loading preferences (possibly a malformed or truncated settings file).");
 		e.printStackTrace();
 		return false;
 	}
+
+	/*	New V0.2.1: one line for the whole file, instead of one per setting (those only in debug mode, see logImport). */
+	String loaded = "";
+	for(int c = 0; c < channelIDs.length; c++){
+		loaded += (c == 0 ? "" : "; ") + "channel " + channelIDs [c] + " " + chosenAlgorithms [c];
+	}
+	IJ.log(PLUGIN_NAME + ": settings loaded for " + channelIDs.length + " channel(s): " + loaded);
 	return true;
 }
+
+
 
 /**
  * New in V0.2.0:
@@ -2376,76 +2402,138 @@ private boolean enterSettings() {
 	return true;
 }
 
-/** Route a warning to a dialog when interactive, to the log otherwise. */
-private void warn(String message){
-	IJ.log(PLUGIN_NAME + " WARNING: " + message);
-	if(showGUIs && !GraphicsEnvironment.isHeadless()){
-		IJ.showMessage(PLUGIN_NAME + " - warning", message);
+/** New V0.2.1: a setting that makes the run meaningless - the run will not start. <brief> is the line shown in the
+ *	dialog, <detail> (may be null) the explanation that goes to the Log with it. */
+private void refuse(String brief, String detail){
+	checkErrors.add(brief);
+	IJ.log(PLUGIN_NAME + " ERROR: " + brief + (detail == null ? "" : "\n" + detail));
+}
+
+/** Changed V0.2.1: a setting that is probably not intended - collected and shown with the others (showCheckResults)
+ *	rather than as a pop-up of its own. <brief> is the line shown in the dialog, <detail> the explanation for the Log. */
+private void warn(String brief, String detail){
+	checkWarnings.add(brief);
+	IJ.log(PLUGIN_NAME + " WARNING: " + brief + (detail == null ? "" : "\n" + detail));
+}
+
+/**
+ * New V0.2.1: shows what validateSettings collected, in ONE dialog per kind.
+ * Errors: one dialog listing all of them, and the run does not start. Warnings: one dialog listing them, with
+ * Continue and Cancel. Headless and macro runs show no dialog for warnings (they are in the Log); errors end there
+ * with one message, because the run stops.
+ * @return true if the run may start
+ */
+private boolean showCheckResults(){
+	boolean dialog = showGUIs && !GraphicsEnvironment.isHeadless();
+	if(!checkErrors.isEmpty()){
+		String heading = checkErrors.size() == 1 ? "This setting must be changed before the run can start:"
+				: "These " + checkErrors.size() + " settings must be changed before the run can start:";
+		if(dialog){
+			showCheckList("settings problem", heading, checkErrors, false);
+		}else{
+			IJ.error(PLUGIN_NAME, heading + "\n" + String.join("\n", checkErrors) + "\nDetails are in the Log.");
+		}
+		return false;
 	}
+	if(!checkWarnings.isEmpty() && dialog){
+		String heading = checkWarnings.size() == 1 ? "Please check this setting:"
+				: "Please check these " + checkWarnings.size() + " settings:";
+		return showCheckList("warnings", heading, checkWarnings, true);
+	}
+	return true;
+}
+
+/**
+ * New V0.2.1: the dialog of showCheckResults. The problems are short lines in a text field WITH A SCROLL BAR, so a long
+ * list cannot make the dialog taller than the screen (one addMessage per problem would); the explanations are in the
+ * Log, so the dialog stays short.
+ * @return true for Continue
+ */
+private boolean showCheckList(String title, String heading, java.util.ArrayList<String> items, boolean canContinue){
+	String text = "";
+	for(int i = 0; i < items.size(); i++){
+		text += "- " + items.get(i) + "\n";
+	}
+	java.awt.TextArea list = new java.awt.TextArea(text, Math.min(12, items.size() + 1), 90,
+			java.awt.TextArea.SCROLLBARS_VERTICAL_ONLY);	// no horizontal bar: long lines wrap
+	list.setEditable(false);
+	java.awt.Panel panel = new java.awt.Panel();
+	panel.add(list);
+
+	GenericDialog gd = new GenericDialog(PLUGIN_NAME + " - " + title);
+	gd.setInsets(0,0,0);	gd.addMessage(heading, SUB_HEADING_FONT);
+	gd.addPanel(panel);
+	gd.setInsets(5,0,0);	gd.addMessage("The explanations are in the Log window.", INSTRUCTIONS_FONT);
+	if(canContinue){
+		gd.setOKLabel("Continue");
+	}else{
+		gd.hideCancelButton();
+	}
+	gd.showDialog();
+	return canContinue && !gd.wasCanceled();
 }
 
 /**
  * Check the settings once, whatever route they arrived by. Returns false only for
  * problems that would make the run meaningless; everything else warns and continues.
+ * Changed V0.2.1: every check runs and reports through refuse / warn; showCheckResults shows them all at the end.
  */
 private boolean validateSettings(){
+	checkErrors.clear();
+	checkWarnings.clear();
 	if(channelIDs == null || channelIDs.length == 0){
-		IJ.error(PLUGIN_NAME + ": no channel was configured.");
-		return false;
+		refuse("No channel was configured.", null);
+		return showCheckResults();
 	}
 
 	for(int c = 0; c < channelIDs.length; c++){
 		if(channelIDs [c] < 1){
-			IJ.error(PLUGIN_NAME + ": channel number " + channelIDs [c] + " is not valid (must be >= 1).");
-			return false;
+			refuse("Channel number " + channelIDs [c] + " is not valid (it must be 1 or higher).", null);
 		}
 		// The same channel twice means the second pass segments an already-segmented
 		// channel, which silently produces nonsense.
 		for(int d = 0; d < c; d++){
 			if(channelIDs [c] == channelIDs [d]){
-				IJ.error(PLUGIN_NAME + ": channel " + channelIDs [c] + " is configured twice."
-						+ " The second run would segment the output of the first."
+				refuse("Channel " + channelIDs [c] + " is configured twice.",
+						"The second run would segment the output of the first."
 						+ " Insert different channel IDs for different channels.");
-				return false;
+				break;	// one line per repeated channel, however often it repeats
 			}
 		}
-		
+
 		// Radii and sigmas.
 		if(medianFilter [c] && medianRadius [c] <= 0){
-			IJ.error(PLUGIN_NAME + ": the median filter radius must be > 0.");
-			return false;
+			refuse("Channel " + channelIDs [c] + ": the median filter radius must be > 0.", null);
 		}
 		if(preBlur [c] && preBlurRadius [c] <= 0){
-			IJ.error(PLUGIN_NAME + ": the pre-segmentation blur radius must be > 0.");
-			return false;
+			refuse("Channel " + channelIDs [c] + ": the pre-segmentation blur radius must be > 0.", null);
 		}
 		if(subtractBackground [c] && subtractBGRadius [c] <= 0){
-			IJ.error(PLUGIN_NAME + ": the rolling-ball radius must be > 0.");
-			return false;
+			refuse("Channel " + channelIDs [c] + ": the rolling-ball radius must be > 0.", null);
 		}
 		if(divideBackground [c] && divideBGRadius [c] <= 0){
-			IJ.error(PLUGIN_NAME + ": the divide-by-background radius must be > 0.");
-			return false;
+			refuse("Channel " + channelIDs [c] + ": the divide-by-background radius must be > 0.", null);
 		}
 		if(additionalBlur [c] && additionalBlurRadius [c] <= 0){
-			IJ.error(PLUGIN_NAME + ": the Gaussian blur radius must be > 0.");
-			return false;
+			refuse("Channel " + channelIDs [c] + ": the Gaussian blur radius must be > 0.", null);
 		}
 
-		// Divide-by-background computes value / blurredValue in 32-bit. Where the
-		// blurred background is ~0 the result is Inf or NaN, which then never passes a
-		// finite threshold - the cilia silently vanish.
+		/*	Divide-by-background computes value / blurredValue in 32-bit. Where the blurred background is ~0 the
+		 *	result is Inf or NaN. Changed V0.2.1: the text said "nothing will be detected" - in fact such voxels
+		 *	PASS the threshold (segmentImage removes a voxel only if value < threshold, which is false for NaN and
+		 *	Inf), so the mask fills the background there. */
 		if(divideBackground [c]){
-			warn("Channel " + channelIDs [c] + ": 'Divide by Background' divides by a blurred"
-				+ "\ncopy of the image. If the background of this channel is (close to) zero -"
-				+ "\nfor example in a channel that was already background-subtracted - the"
-				+ "\nresult is infinite or undefined and nothing will be detected."
+			warn("Channel " + channelIDs [c] + ": 'Divide by Background' fills the mask where the background is (close to) zero.",
+				"It divides by a blurred copy of the image. Where the background of this channel is (close to) zero -"
+				+ "\nfor example in a channel that was already background-subtracted - the result is infinite or"
+				+ "\nundefined, and such voxels pass every threshold, so the background becomes foreground there."
 				+ "\nPrefer 'Subtract Background' for such images.");
 		}
 
 		// Two blurs in a row is legal but rarely intended.
 		if(preBlur [c] && additionalBlur [c]){
-			warn("Channel " + channelIDs [c] + ": both the pre-background blur (" + df3.format(preBlurRadius [c])
+			warn("Channel " + channelIDs [c] + ": the image is blurred twice (before and after the background removal).",
+				"Both the pre-background blur (" + df3.format(preBlurRadius [c])
 				+ ")\nand the post-background blur (" + df3.format(additionalBlurRadius [c])
 				+ ")\nare enabled. The image is smoothed twice; the effective smoothing is"
 				+ "\nlarger than either value. This is only useful if you deliberately want to"
@@ -2454,17 +2542,21 @@ private boolean validateSettings(){
 
 		// A blur wider than the structures removes them.
 		if(preBlur [c] && subtractBackground [c] && preBlurRadius [c] >= subtractBGRadius [c]){
-			warn("Channel " + channelIDs [c] + ": the pre-blur radius (" + df3.format(preBlurRadius [c])
+			warn("Channel " + channelIDs [c] + ": the pre-blur radius is not smaller than the rolling-ball radius.",
+				"The pre-blur radius (" + df3.format(preBlurRadius [c])
 				+ ") is not smaller than the rolling-ball radius (" + df3.format(subtractBGRadius [c])
 				+ "). Smoothing at the scale of the background estimate largely cancels the"
 				+ " background subtraction. A pre-blur of about a quarter of the rolling-ball"
 				+ " radius is a reasonable starting point.");
 		}
 
-		// CUSTOM threshold with the default value is almost always an oversight.
+		/*	CUSTOM threshold with the default value is almost always an oversight. Changed V0.2.1: the text said every
+		 *	voxel ABOVE zero is kept; a voxel is removed only if value < threshold, so at 0 every voxel stays, and in
+		 *	a binary output the background becomes foreground too. */
 		if(chosenAlgorithms [c].equals("CUSTOM threshold") && customThr [c] == 0.0){
-			warn("Channel " + channelIDs [c] + ": segmentation method is 'CUSTOM threshold'"
-				+ "\nbut the threshold is 0, so every voxel above zero will be kept."
+			warn("Channel " + channelIDs [c] + ": the CUSTOM threshold is 0, so no voxel is removed.",
+				"Segmentation method is 'CUSTOM threshold' but the threshold is 0. A voxel is removed only if it is"
+				+ "\nbelow the threshold, so every voxel stays - in a binary output the background becomes foreground too."
 				+ "\nDid you mean to enter a threshold value?");
 		}
 
@@ -2472,21 +2564,22 @@ private boolean validateSettings(){
 		if(chosenAlgorithms [c].equals("HYSTERESIS threshold")
 				&& chosenLowAlg [c].equals(chosenHighAlg [c])
 				&& !chosenLowAlg [c].equals(hystAlgorithms[0])){
-			warn("Channel " + channelIDs [c] + ": hysteresis thresholding was selected but the"
+			warn("Channel " + channelIDs [c] + ": hysteresis low and high threshold use the same method, so it acts as a plain threshold.",
+				"Hysteresis thresholding was selected but the"
 				+ "\nlow and high thresholds use the same method (" + chosenLowAlg [c] + "),"
 				+ "\nso it behaves like a plain threshold. Pick a more inclusive method for the"
 				+ "\nlow threshold, for example Triangle low and Otsu high.");
 		}
 
-		// The 3D suite is needed for two methods.
+		/*	The 3D suite is needed for two methods. Changed V0.2.1: the line says how to install it, since the settings
+		 *	dialogs of the two methods no longer carry an installation note. */
 		if(chosenAlgorithms [c].equals("CANNY 3D") || chosenAlgorithms [c].equals("HYSTERESIS threshold")){
 			try{
 				Class.forName("mcib3d.image3d.ImageInt");
 			}catch(ClassNotFoundException e){
-				IJ.error(PLUGIN_NAME + ": '" + chosenAlgorithms [c] + "' requires the 3D ImageJ Suite,"
-					+ "\nwhich is not installed. See"
-					+ "\nhttps://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ");
-				return false;
+				refuse("Channel " + channelIDs [c] + ": '" + chosenAlgorithms [c] + "' requires the 3D ImageJ Suite, which is not"
+					+ " installed. Install it with Help > Update... > Manage update sites > '3D ImageJ Suite' and restart Fiji.",
+					"See https://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ");
 			}
 		}
 		
@@ -2504,21 +2597,20 @@ private boolean validateSettings(){
 				reject = expansionSettings [c].toRidgeSettings().settingsRejectionReason();
 		}
 		if(reject != null){
-			IJ.error(PLUGIN_NAME, "Channel " + channelIDs [c] + ": " + reject + "."
-					+ "\nChange the setting and run again.");
-			return false;
+			refuse("Channel " + channelIDs [c] + ": " + reject + ".", null);
 		}
 	}
 
 	if(chosenImageStyle.equals(intensityVariant[1])){
-		warn("Segmentation style is set to produce a BINARY image. CiliaQ can still reconstruct"
+		warn("Binary output: Fine for measuring intensity values in non-segmented channels,\nbut intensity values that CiliaQ derives from the segmented channels will be meaningless.",
+			"Segmentation style is set to produce a BINARY image. CiliaQ can still reconstruct"
 			+ "\ncilia from it and this option can be helpful if you have 0 background pixel values."
 			+ "\nHowever, note that intensity values derived from the mask / reconstruction channel"
 			+ "\nwill be meaningless. Intensity measures on all other channels will be fine."
 			+ "\nUse 'Keep intensities above threshold' unless you specifically"
 			+ " need a binary mask.");
 	}
-	return true;
+	return showCheckResults();
 }
 
 /** Checks that need the image. Returns false to skip this image, not to abort the batch. */
@@ -3027,7 +3119,7 @@ ImagePlus divideByBackground(ImagePlus imp, double radius) {
 }
 
 ImagePlus blurGaussian(ImagePlus imp, double radius) {
-	ImagePlus outImp = IJ.createHyperStack("divided image", imp.getWidth(), imp.getHeight(), 
+	ImagePlus outImp = IJ.createHyperStack("blurred image", imp.getWidth(), imp.getHeight(), 
 			imp.getNChannels(), imp.getNSlices(), imp.getNFrames(), imp.getBitDepth());
 	outImp.setCalibration(imp.getCalibration());
 	outImp.setOverlay(imp.getOverlay());
@@ -3260,7 +3352,7 @@ private double [][] getThresholdsPerSlice (ImagePlus imp, String chosenMethod, S
  *	For methods that connect objects across slices, a per-slice threshold is not meaningful, so
  *	STACK_PER_SLICE is mapped to STACK_POOLED. Without this the value falls through to the "no stack"
  *	branch and the threshold would come from SLICE 1 ALONE - a silent and much worse answer than
- *	pooling. validateSettings warns the user that this substitution happened.
+ *	pooling. validateAgainstImage notes this substitution for each image it applies to.
  */
 private String stackMethodForStackWideMethod(String chosenMethod){
 	return STACK_PER_SLICE.equals(chosenMethod) ? STACK_POOLED : chosenMethod;
@@ -3919,8 +4011,13 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressReporter progress
 				for(int y = 0; y < selectedImp.getHeight(); y++){
 					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
 						writeImp.getStack().setVoxel(x, y, indexWriteImp, 0.0);
-					}else if(!keepIntensities){
-						writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
+					}else{
+						/*	New V0.2.1: counted here so that the zero-intensity loss warning
+						 *	fires for CANNY 3D. */
+						countSegmentedVoxel(writeImp, x, y, indexWriteImp);
+						if(!keepIntensities){
+							writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
+						}
 					}
 				}
 			}
@@ -3968,8 +4065,13 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressReporter progr
 				for(int y = 0; y < selectedImp.getHeight(); y++){
 					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
 						writeImp.getStack().setVoxel(x, y, indexWriteImp, 0.0);
-					}else if(!keepIntensities){
-						writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
+					}else{
+						/*	New V0.2.1: counted here so that the zero-intensity loss warning
+						 *	fires for HYSTERESIS. */
+						countSegmentedVoxel(writeImp, x, y, indexWriteImp);
+						if(!keepIntensities){
+							writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
+						}
 					}
 				}
 			}
@@ -4148,10 +4250,10 @@ private ImagePlus maximumProjection(ImagePlus imp, int startSlice, int endSlice)
 	return outImp;
 }
 
-
 /**
- * @return a threshold for the slice image <s> in the ImagePlus <parImp> for the image <imp>
- * range: 1 <= z <= stacksize
+ * @return the auto-threshold (its lower bound) of the slice image <s> of <imp> by the method <chosenAlg>, for bright
+ * objects on a dark background
+ * range: 1 <= s <= stacksize
  * */
 private double getSingleSliceImageThreshold (ImagePlus imp, int s, String chosenAlg){
 	//calculate thresholds	
@@ -4193,8 +4295,9 @@ private ImagePlus getSelectedTimepoints (ImagePlus imp, int firstTimepoint, int 
 }
 
 /**
- * Calculates a threshold in the histogram of ImagePlus <parImp> for the image <imp>
- * Only the slice images between the indicated <startSliceImage> and <endSliceImage> are included into calculation
+ * Calculates a threshold by the method <algorithm> in the histogram of ALL slice images of <imp> (the "stack" option),
+ * for bright objects on a dark background
+ * @return its lower bound
  * */
 private double getHistogramThreshold (ImagePlus imp, String algorithm){
 	//calculate thresholds	
@@ -4237,17 +4340,21 @@ private void countSegmentedVoxel(ImagePlus imp, int x, int y, int z){
 
 private boolean requestHysteresisPrefs(String task, int c) {
 	GenericDialog gd = new GenericDialog(PLUGIN_NAME + " - Hysteresis thresholding");
-	gd.addMessage(PLUGIN_NAME + " - Version " + PLUGIN_VERSION + "",
-			SUPER_HEADING_FONT);
-	gd.setInsets(10,0,0);	gd.addMessage("Insert processing settings for " + task, new Font("Sansserif", Font.PLAIN, 16));
-	gd.setInsets(0,0,0);	gd.addMessage("Hysteresis thresholding requires the '3D ImageJ suite' (https://imagej.net/plugins/3d-imagej-suite/).", new Font("Sansserif", 2, 12));
-	gd.setInsets(0,0,0);	gd.addMessage("If you have not installed it yet, please install the '3D ImageJ suite' as explained in the CiliaQ Wiki:", new Font("Sansserif", 2, 12));
-	gd.setInsets(0,0,0);	gd.addMessage("https://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ", new Font("Sansserif", 2, 12));
+	gd.setInsets(0,0,0);
+	gd.addMessage(PLUGIN_NAME + " - Version " + PLUGIN_VERSION + " - Hysteresis thresholding", SUPER_HEADING_FONT);
+	gd.setInsets(5,0,0);
+	gd.addMessage("Insert processing settings for " + task, HEADING_FONT);
+	gd.setInsets(5,0,0);
+	gd.addMessage("Click the help button for more guidance on how to use hysteresis thresholding.", INSTRUCTIONS_FONT);
 	
-	gd.setInsets(20,0,0);	gd.addChoice("Select method for low threshold", hystAlgorithms, chosenLowAlg [c]);
-	gd.setInsets(0,0,0);	gd.addNumericField("Low threshold (if 'CUSTOM threshold' is chosen)", customLowThr [c], 5);
-	gd.setInsets(0,0,0);	gd.addChoice("Select method for high threshold", hystAlgorithms, chosenHighAlg [c]);
-	gd.setInsets(0,0,0);	gd.addNumericField("High threshold (if 'CUSTOM threshold' is chosen)", customHighThr [c], 5);
+	gd.setInsets(10,0,0);
+	gd.addChoice("Select method for low threshold", hystAlgorithms, chosenLowAlg [c]);
+	gd.setInsets(0,0,0);
+	gd.addNumericField("Low threshold (if 'CUSTOM threshold' is chosen)", customLowThr [c], 5);
+	gd.setInsets(0,0,0);
+	gd.addChoice("Select method for high threshold", hystAlgorithms, chosenHighAlg [c]);
+	gd.setInsets(0,0,0);
+	gd.addNumericField("High threshold (if 'CUSTOM threshold' is chosen)", customHighThr [c], 5);
 
 	gd.addHelp("https://github.com/hansenjn/CiliaQ/wiki/Hysteresis-threshold-in-CiliaQ-Preparator");
 	gd.showDialog();
@@ -4296,7 +4403,7 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 		}else{tp.append("");}
 		if("CANNY 3D".equals(chosenAlgorithms [i])){
 			tp.append("		Segmentation method:	" + "Canny 3D Thresholder, a plugin by Sebastian Rassmann,"
-					+ " see https://github.com/sRassmann/canny3d-thresholder for a descriptions.");
+					+ " see https://github.com/sRassmann/canny3d-thresholder for a description.");
 			tp.append("			Gauss sigma:	" + cannySettings[i].getGaussSigma());
 			tp.append("			Canny alpha:	" + cannySettings[i].getCannyAlpha());
 			tp.append("			Low threshold method (hysteresis thresholding):	" + cannySettings[i].getLowThresholdAlgorithm());
