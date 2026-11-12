@@ -13,7 +13,7 @@ public class Processing {
 	 * This code was retrieved from https://github.com/sRassmann/canny3d-thresholder, version v0.1.0; Code was adapted by 
 	 * @author Jan N. Hansen
 	 * to fit into the CiliaQ_Preparator.
-	 * Last modification: Sep 19, 2023.
+	 * Last modification: November 11, 2026.
 	 * 
 	 * Wraps the logic and real processing of the generated plugin.
 	 * 
@@ -78,11 +78,21 @@ public class Processing {
 			
 			Interpreter.removeBatchModeImage(bin);
 			return bin;
-		}catch(RuntimeException e){
+		} catch (Throwable e) {
+			// New in V0.2.1: Throwable, not only RuntimeException, so an Error cleans up too; rethrown unchanged
+			
 			// Clean up any partial results so they cannot be flushed to screen on exit.
-			if(edges != null){ edges.changes = false; edges.close(); }
-			if(bin   != null){ bin.changes   = false; bin.close();   }
-			throw e;   // caller (segmentUsingCanny3D) logs and does break running
+			if (edges != null) {
+				edges.changes = false;
+				edges.close();
+			}
+			if (bin != null) {
+				bin.changes = false;
+				bin.close();
+			}
+			thrChannel.changes = false; // New in V0.2.1: the input copy too, which only the success path closed
+			thrChannel.close();
+			throw e; // caller (segmentUsingCanny3D) logs and does break running
 		}finally {
 			// Always restore whatever batch state we found, even on exception.
 			Interpreter.batchMode = previousBatch;

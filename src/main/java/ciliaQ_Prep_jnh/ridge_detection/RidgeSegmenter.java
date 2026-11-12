@@ -96,6 +96,7 @@ public class RidgeSegmenter {
 		public final int nLinesTotal;
 		public final int width, height, nSlices;
 		public final boolean wrapped;
+		public int failedPlanes;	// Planes on which the detector failed; they count as empty, and the report says how many
 		Result(int[][] labels, int nObjects, int nLinesTotal, int w, int h, int d, boolean wrapped) {
 			this.labels = labels; this.nObjects = nObjects; this.nLinesTotal = nLinesTotal;
 			this.width = w; this.height = h; this.nSlices = d; this.wrapped = wrapped;
@@ -125,18 +126,26 @@ public class RidgeSegmenter {
 					+ " processing.)", ProgressReporter.NOTIFICATION);
 		});
 
-		/*	New V0.2.1: the z method. On a single plane all three methods are the same, so a single plane always takes the
-		 *	classic path (with the clean-up rules). */
-		int[][] perVoxel; int nLines;
+		/*
+		 * New V0.2.1: the z method. On a single plane all three methods are the same,
+		 * so a single plane always takes the classic path (with the clean-up rules).
+		 */
+		int[][] perVoxel;
+		int nLines, failedPlanes;
 		if (D > 1 && !RidgeSettings.Z_CLASSIC.equals(rs.zMethod)) {
 			RidgeZ.Output o = RidgeZ.detect(channelImp, rs, RidgeSettings.Z_3D.equals(rs.zMethod), progress, watchdog);
-			perVoxel = o.labels; nLines = o.nLines;
+			perVoxel = o.labels;
+			nLines = o.nLines;
+			failedPlanes = o.failedPlanes;
 		} else {
-			int[] nl = new int[1];
+			int[] nl = new int[2]; // [0] lines detected, [1] planes on which the detector failed (New in V0.2.1)
 			perVoxel = classic(channelImp, rs, progress, watchdog, nl);
 			nLines = nl[0];
+			failedPlanes = nl[1];
 		}
-		return numbered(perVoxel, nLines, W, H, D);
+		Result res = numbered(perVoxel, nLines, W, H, D);
+		res.failedPlanes = failedPlanes;
+		return res;
 	}
 
 	/**
@@ -148,7 +157,8 @@ public class RidgeSegmenter {
 	 *  - the minimum length applies to the finished object, measured on its projection (distinct line positions in xy, so a
 	 *    filament seen in several planes counts once); per plane Steger keeps pieces down to 2 px, so the short in-focus
 	 *    pieces of a tilted filament are not lost.
-	 * @return labels per plane [z][y*W + x] numbered by object (not yet consecutive); nLinesOut[0] = lines detected
+	 * @return labels per plane [z][y*W + x] numbered by object (not yet consecutive); nLinesOut[0] = lines detected,
+	 * nLinesOut[1] = planes on which the detector failed
 	 */
 	static int[][] classic(ImagePlus channelImp, RidgeSettings rs, ProgressReporter progress, SlowWatchdog watchdog, int[] nLinesOut) {
 		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
@@ -188,14 +198,14 @@ public class RidgeSegmenter {
 				 */
 				throw overCap;
 			} catch (Throwable e) {
-				StringBuilder trace = new StringBuilder();
-				for (StackTraceElement line : e.getStackTrace()) {
-					trace.append(" \n ").append(line.toString());
-				}
-				// Any other failure on one plane must not lose the others.
-				progress.notifyMessage(
-						"CiliaQ Preparator: ridge detection failed on plane " + (z + 1) + " - " + e + trace,
-						ProgressReporter.NOTIFICATION);
+				if (e instanceof ThreadDeath) // A stopped thread (Abort Macro, the Script Editor's Kill) ends the run
+					throw (ThreadDeath) e;
+				
+				// Any other failure on one plane must not lose the others: the plane counts as empty.
+				// An ERROR, so the image is flagged, and counted for the report (Result.failedPlanes)
+				progress.notifyMessage("Ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
+						ProgressReporter.ERROR);
+				nLinesOut[1]++;
 				LS = new ArrayList<float[][]>();
 				apart = new ArrayList<int[]>();
 			}

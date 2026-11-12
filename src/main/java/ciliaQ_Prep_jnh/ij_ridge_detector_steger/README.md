@@ -207,6 +207,16 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
 except for the junction sort (8); overlap resolution was rebuilt (9) and can take the line width (10);
 the search-line buffer fits small sigmas (11).
 
+## How CiliaQ sets the thresholds it passes in (not a modification of this code)
+
+The detector takes sigma and the upper and lower thresholds. CiliaQ Preparator derives them from the expected line
+width and a *signal range* of the channel: contrast = sensitivity × range, converted to the detector's
+second-derivative units (`RidgeSettings.thresholdForContrast`). In v0.2.1 the range is measured in tiles
+(`ciliaQ_Prep_jnh.CiliaQPrepStatistics.SignalRange`): the median of the ranges (p99.9 − median; median − p0.1 for dark
+lines) of the whole stack, a 3×3 grid and the same grid shifted by half a tile, leaving out tiles without a single
+positive voxel in the raw channel. This was done for robustness: In a test, one bright artefact moved the whole-stack
+range by up to ×16384, and in small crops the cilium itself filled the top 0.1 % and raised the thresholds until half
+of it was missed. Nothing in this package changed for it.
 
 ## Observations and their investigation
 

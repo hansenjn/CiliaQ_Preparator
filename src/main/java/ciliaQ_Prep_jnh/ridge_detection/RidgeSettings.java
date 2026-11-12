@@ -33,7 +33,7 @@ import ij.IJ;
  * WHY THE DERIVATION LIVES HERE, NOT IN THE DIALOG.
  * Fiji's own Ridge Detection plugin computes sigma and the thresholds inside its dialog listener. That
  * listener never fires in macro or headless mode, so a macro caller would silently receive unconverted
- * defaults. To avoid that, deriveFrom(...) is a plain method that the PROCESSING code calls
+ * defaults. To avoid that, deriveFromRange(...) is a plain method that the PROCESSING code calls
  * unconditionally; the advanced dialog only pre-fills its fields with the same formula on a 0-255 range,
  * as a guide.
  *
@@ -61,7 +61,7 @@ public class RidgeSettings implements Cloneable {
 	
 	/** Simple section - what the user is expected to set. */
 	public double lineWidth = 2.0;			// pixels, IN THE PREPROCESSED IMAGE
-	public double sensitivity = 1.0;		// fraction of the signal range used as line contrast
+	public double sensitivity = 8.0;		// line contrast = sensitivity x signal range; 8 suits sparse cilia in noisy ICC IF images (judged by eye on 29 stacks)
 	public double minLength = 10.0;			// pixels
 	public boolean resolveCrossings = true;	// OverlapOption.SLOPE when true
 
@@ -221,8 +221,10 @@ public class RidgeSettings implements Cloneable {
 		deriveFromRange(darkLine ? median - lowPercentile : highPercentile - median);
 	}
 
-	/** The derivation for a given signal range (the line contrast at sensitivity 1). */
-	void deriveFromRange(double signalRange) {
+	/** The derivation for a given signal range (the line contrast at sensitivity 1).
+	 *	Public from V0.2.1: the plugin measures the range in tiles (CiliaQPrepStatistics.SignalRange).
+	 * */
+	public void deriveFromRange(double signalRange) {
 		if (advancedOverride) return;
 		this.contrastHigh = sensitivity * Math.max(0.0, signalRange);
 		this.contrastLow = LOW_TO_HIGH * this.contrastHigh;
@@ -275,10 +277,10 @@ public class RidgeSettings implements Cloneable {
 	public String rejectionReason(double madOfChannel) {
 		String s = settingsRejectionReason();
 		if (s != null) return s;
-		if (upperThreshold <= 0.0)
-			return "ridge detection: derived upper threshold is 0 - increase 'contrast sensitivity' "
+		if (!(upperThreshold > 0.0))
+			return "ridge detection: derived upper threshold is 0 or not a number - increase 'contrast sensitivity' "
 					+ "or check that the channel carries signal";
-		/*	New V0.2.1: only for derived thresholds. With the advanced values overridden, deriveFrom does not run, the contrast stays 0
+		/*	New V0.2.1: only for derived thresholds. With the advanced values overridden, deriveFromRange returns at once, the contrast stays 0
 		 *	and this check refused every such run on a channel with noise (MAD > 0) - Jan's own sperm settings among them. */
 		if (!advancedOverride && madOfChannel > 0.0 && contrastHigh < 2.0 * madOfChannel)
 			return "ridge detection: the line contrast this would look for (" + IJ.d2s(contrastHigh, 2)
@@ -321,7 +323,9 @@ public class RidgeSettings implements Cloneable {
 
 		gd.setInsets(0, 5, 0); gd.addNumericField("Expected filament width in preprocessed image (px)", inst.lineWidth, 2);
 		gd.setInsets(0, 5, 0); gd.addNumericField("Contrast sensitivity (higher = stricter = fewer lines)", inst.sensitivity, 2);
-		gd.setInsets(0, 5, 0); gd.addNumericField("Min. filament length (px) - set just below shortest real filament", inst.minLength, 1);
+		gd.setInsets(0, 5, 0); gd.addMessage("Default 8 suits sparse cilia in noisy images. Lower it for clean, high-contrast or densely packed cilia"
+				+ "\n(in a test on different image and cilia types, good values were 0.09 to 16, by data type and resolution).", help);
+		gd.setInsets(2, 5, 0); gd.addNumericField("Min. filament length (px) - set just below shortest real filament", inst.minLength, 1);
 		gd.setInsets(0, 5, 0); gd.addCheckbox("Resolve crossings - trace filaments through crossings instead of ending there", inst.resolveCrossings);
 				
 		gd.setInsets(0, 0, 0); gd.addMessage("----- Z-stacks -----", sub);
@@ -486,7 +490,7 @@ public class RidgeSettings implements Cloneable {
 			sb.append("		Sigma	").append(IJ.d2s(sigma, 4)).append("\n");
 			sb.append("		Upper threshold	").append(IJ.d2s(upperThreshold, 4)).append("\n");
 			sb.append("		Lower threshold	").append(IJ.d2s(lowerThreshold, 4)).append("\n");
-			if (!advancedOverride) {	// with overridden values deriveFrom does not run, so no contrast was used
+			if (!advancedOverride) {	// with overridden values deriveFromRange returns at once, so no contrast was used
 				sb.append("		High contrast	").append(IJ.d2s(contrastHigh, 3)).append("\n");
 				sb.append("		Low contrast	").append(IJ.d2s(contrastLow, 3)).append("\n");
 			}

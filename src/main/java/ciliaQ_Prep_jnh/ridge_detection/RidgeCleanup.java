@@ -145,6 +145,24 @@ public class RidgeCleanup {
 
 	/** the parallel pairs of line a with the lines after it */
 	void parallelsOf(List<float[][]> out, Map<Long, List<int[]>> grid, int a, double w, int need, List<int[]> apart) {
+		float[][] L = out.get(a);
+		Map<Integer, int[]> run = parallelRuns(out, grid, a, w); // other line -> {current run, best run, last index}
+		for (Map.Entry<Integer, int[]> r : run.entrySet()) {
+			if (r.getValue()[1] < need || a >= r.getKey())
+				continue;
+			if (turnRelease && turnJoins(L, out.get(r.getKey()), out, a, r.getKey(), w)) {
+				nHairpin++;
+				continue;
+			}
+			apart.add(new int[] { a, r.getKey(), PARALLEL });
+			nPar++;
+		}
+	}
+
+	/**
+	 * @return other line -> {current run, best run, last index}
+	 */
+	Map<Integer, int[]> parallelRuns(List<float[][]> out, Map<Long, List<int[]>> grid, int a, double w) {
 		double dmin = PAR_MIN * w, dmax = PAR_MAX * w, cos20 = Math.cos(Math.toRadians(20));
 		float[][] L = out.get(a);
 		int n = L[0].length;
@@ -154,18 +172,7 @@ public class RidgeCleanup {
 			double[] t = tan(L, i, w);
 			if (t == null)
 				continue;
-			Map<Integer, Double> best = new HashMap<>();
-			for (int dx = -gr; dx <= gr; dx++)
-				for (int dy = -gr; dy <= gr; dy++)
-					for (int[] e : grid.getOrDefault(cell(L[0][i] + 4 * dx, L[1][i] + 4 * dy),
-							Collections.<int[]>emptyList())) {
-						if (e[0] == a)
-							continue;
-						float[][] M = out.get(e[0]);
-						double d = Math.hypot(M[0][e[1]] - L[0][i], M[1][e[1]] - L[1][i]);
-						if (d < best.getOrDefault(e[0], Double.MAX_VALUE))
-							best.put(e[0], d);
-					}
+			Map<Integer, Double> best = nearestPerLine(out, grid, a, L[0][i], L[1][i], gr);
 			for (Map.Entry<Integer, Double> b : best.entrySet()) {
 				double d = b.getValue();
 				if (d < dmin || d > dmax)
@@ -181,16 +188,27 @@ public class RidgeCleanup {
 				r[1] = Math.max(r[1], r[0]);
 			}
 		}
-		for (Map.Entry<Integer, int[]> r : run.entrySet()) {
-			if (r.getValue()[1] < need || a >= r.getKey())
-				continue;
-			if (turnRelease && turnJoins(L, out.get(r.getKey()), out, a, r.getKey(), w)) {
-				nHairpin++;
-				continue;
-			}
-			apart.add(new int[] { a, r.getKey(), PARALLEL });
-			nPar++;
-		}
+		return run;
+	}
+
+	/**
+	 * for one point (x, y) of line a: the distance to the nearest point of each
+	 * other line within +-gr grid cells of 4 px
+	 */
+	Map<Integer, Double> nearestPerLine(List<float[][]> out, Map<Long, List<int[]>> grid, int a, float x, float y,
+			int gr) {
+		Map<Integer, Double> best = new HashMap<>();
+		for (int dx = -gr; dx <= gr; dx++)
+			for (int dy = -gr; dy <= gr; dy++)
+				for (int[] e : grid.getOrDefault(cell(x + 4 * dx, y + 4 * dy), Collections.<int[]>emptyList())) {
+					if (e[0] == a)
+						continue;
+					float[][] M = out.get(e[0]);
+					double d = Math.hypot(M[0][e[1]] - x, M[1][e[1]] - y);
+					if (d < best.getOrDefault(e[0], Double.MAX_VALUE))
+						best.put(e[0], d);
+				}
+		return best;
 	}
 
 	/**

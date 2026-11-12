@@ -10,11 +10,9 @@ package ciliaQ_Prep_jnh;
 * but WITHOUT ANY WARRANTY; without even the implied warranty of
 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 * GNU General Public License for more details.
-*  
-* See the GNU General Public License for more details.
-*  
+* 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 9, 2026)
+* Date: September 29, 2019 (This Version: November 11, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -27,10 +25,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.*;
 import java.text.*;
-
 import javax.swing.UIManager;
+import java.awt.GraphicsEnvironment;
 
-import ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings;
 import ij.*;
 import ij.gui.*;
 import ij.io.*;
@@ -38,11 +35,13 @@ import ij.measure.*;
 import ij.plugin.*;
 import ij.process.LUT;
 import ij.plugin.frame.Recorder;
-import java.awt.GraphicsEnvironment;
+import ij.process.AutoThresholder.Method;
 
 import loci.plugins.BF;
 import loci.plugins.in.ImporterOptions;
-import ij.process.AutoThresholder.Method;
+
+import ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings;
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.SignalRange;
 
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
@@ -404,33 +403,36 @@ public void run(String arg) {
 //	RoiEncoder re;
 	{
 		//Improved file selector
-		try{UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());}catch(Exception e){}
-		if(selectedTaskVariant.equals(taskVariant[1])){
-			OpenFilesDialog od = new OpenFilesDialog ();
-			od.setLocation(0,0);
+		try {
+			UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+		} catch (Exception e) {
+		}
+		if (selectedTaskVariant.equals(taskVariant[1])) {
+			OpenFilesDialog od = new OpenFilesDialog();
+			od.setLocation(0, 0);
 			od.setVisible(true);
-			
+
 			od.addWindowListener(new java.awt.event.WindowAdapter() {
-		        public void windowClosing(WindowEvent winEvt) {
-		        	return;
-		        }
-		    });
-		
-			//Waiting for od to be done
-			while(od.done==false){
-				try{
+				public void windowClosing(WindowEvent winEvt) {
+					return;
+				}
+			});
+
+			// Waiting for od to be done
+			while (od.done == false) {
+				try {
 					Thread.sleep(100);
-			    }catch(Exception e){
-			    }
+				} catch (Exception e) {
+				}
 			}
-			
+
 			tasks = od.filesToOpen.size();
-			name = new String [tasks];
-			dir = new String [tasks];
-			for(int task = 0; task < tasks; task++){
+			name = new String[tasks];
+			dir = new String[tasks];
+			for (int task = 0; task < tasks; task++) {
 				name[task] = od.filesToOpen.get(task).getName();
 				dir[task] = od.filesToOpen.get(task).getParent() + System.getProperty("file.separator");
-			}		
+			}
 		}else if(selectedTaskVariant.equals(taskVariant[0])){
 			try {
 				if(WindowManager.getIDList()==null){
@@ -573,39 +575,46 @@ public void run(String arg) {
 //						filesList += name[j] + "\t" + dir[j] + "\t" + series[j] + "\t" + totSeries[j] + "\n";
 					}
 				}
-			} catch (Exception e) {
-				IJ.log(e.getCause().getLocalizedMessage());
-				IJ.log(e.getCause().getMessage());
-				e.printStackTrace();
+			} catch (Throwable e) {
+				// New in V0.2.1: a cancelled macro or a stopped thread ends the run
+				rethrowIfRunEnds(e);
+				/*	New in V0.2.1: e.getCause() is null for most Bio-Formats exceptions, so the log lines here threw a
+				 *	NullPointerException that ended the whole run before its first image. Now the file stays one task; if it
+				 *	cannot be opened either, its task reports that and the batch goes on. */
+				IJ.log(PLUGIN_NAME + ": could not check " + dir[i] + name[i] + " for several series (" + e + ") - it is processed as one image.");
 			}
 		}
 	}
 	
 	
 	//add progressDialog or ConsoleProgress to follow processing progress
-		if(showGUIs && !GraphicsEnvironment.isHeadless()){
-			ProgressDialog dialog = new ProgressDialog(name, tasks);
-			progress = dialog;
-			dialog.setLocation(0,0);
-			dialog.setVisible(true);
-			dialog.addWindowListener(new java.awt.event.WindowAdapter() {
-		        public void windowClosing(WindowEvent winEvt) {
-		        	if(processingDone==false){
-		        		IJ.error("Script stopped...");
-		        	}
-		        	continueProcessing = false;	        	
-		        	return;
-		        }
-			});
-		}else{
-			progress = new ConsoleProgress(name, tasks);
-		}
+	if (showGUIs && !GraphicsEnvironment.isHeadless()) {
+		ProgressDialog dialog = new ProgressDialog(name, tasks);
+		progress = dialog;
+		dialog.setLocation(0, 0);
+		dialog.setVisible(true);
+		dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+			public void windowClosing(WindowEvent winEvt) {
+				if (processingDone == false) {
+					IJ.error("Script stopped...");
+				}
+				continueProcessing = false;
+				return;
+			}
+		});
+	} else {
+		progress = new ConsoleProgress(name, tasks);
+	}
 			
 	
-   	ImagePlus imp; 	  	
+	ImagePlus imp = null, tempImp = null, procImp = null;
+	
    	boolean backgroundPref = Prefs.blackBackground;
 	Prefs.blackBackground =  true;
-	boolean isVirtual;
+	boolean isVirtual = false;
+	String reportPath = null;	// New in V0.2.1: set once an image's .tif is saved, so a failure after that still writes its report
+	boolean reportWritten = false;	// New in V0.2.1: set once its complete report is written, so a later failure leaves the report alone
+	
 	if(keepAwake) {
    		try {
 			robo = new Robot();
@@ -621,7 +630,14 @@ public void run(String arg) {
 		if(keepAwake) {
 			stayAwake();
 		}
-		running: while(continueProcessing){
+		// New in V0.2.1: resets per image, for the clean-up after it
+		imp = null;	tempImp = null;	procImp = null;	isVirtual = false;	reportPath = null;	reportWritten = false;
+		
+		// New in V0.2.1: an error of this image, kept until its clean-up is done and reported after it
+		Throwable failure = null;
+		
+		// New in V0.2.1: try - an error in this image no longer ends the batch (see the catch after the loop)
+		try{running: while(continueProcessing){
 			Date startDate = new Date();
 			progress.updateBarText("in progress...");
 			//Check for problems
@@ -642,8 +658,11 @@ public void run(String arg) {
 			//open Image
 		   	try{
 		   		if(selectedTaskVariant.equals(taskVariant[1])){
-		   			if(name[task].contains(".tif")){
-		   				//TIFF file
+		   			if(name[task].contains(".tif") && totSeries [task] == 1){
+		   				/* New in V0.2.1 don't allow openImage in case this tif has several series.
+		   				 * Bio-Formats below opens this task's series;
+		   				 * IJ.openImage always read the first only
+		   				 * */
 		   				imp = IJ.openImage(""+dir[task]+name[task]+"");		
 		   			}else{
 		   				//bio format reader
@@ -695,8 +714,9 @@ public void run(String arg) {
 		   	//Checking image for being a virtual stack
 		   	isVirtual = false;
 	   		if(imp.getStack().isVirtual()) {
-	   			isVirtual = true;
 	   			imp = imp.duplicate();
+	   			// Only once imp is the copy: the clean-up after the image closes imp when this is set, and must never close the user's own stack
+	   			isVirtual = true;
 	   			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Image " + name [task] + " was a virtual stack image. Copied into work space for processing!", ProgressReporter.LOG);
 	   		}
 	   		
@@ -733,7 +753,6 @@ public void run(String arg) {
 		/******************************************************************
 		*** 						Processing							***	
 		*******************************************************************/
-		   	ImagePlus tempImp, procImp;
 		   	double thresholds [], threshold, thresholdsHyst [][];
 		   	procImp = imp.duplicate();
 		   	procImp.setCalibration(imp.getCalibration());
@@ -830,6 +849,29 @@ public void run(String arg) {
 						stayAwake();
 					}
 		   			
+					/*
+					 * New in V0.2.1: a channel without signal (every voxel the same value after
+					 * preprocessing, see isFlat) is not segmented: its segmented channel is empty,
+					 * the image is saved and the batch goes on. An automatic threshold would flood
+					 * the binary output, and ridge detection and its seeds would refuse the whole
+					 * image.
+					 */
+					if (isFlat(tempImp, 0, 0)) {
+						progress.notifyMessage("Task " + (task + 1) + "/" + tasks + ", channel " + channelIDs[c]
+								+ ": every voxel has the same value after preprocessing (no signal) - the channel was not segmented,"
+								+ " its segmented channel is empty.", ProgressReporter.NOTIFICATION);
+						tp1.append((RIDGE_DETECTION.equals(chosenAlgorithms[c]) ? "Ridge detection"
+								: SPOT_DETECTION.equals(chosenAlgorithms[c]) ? "Spot detection"
+										: EXPANSION_SEEDS.equals(chosenAlgorithms[c]) ? "Expansion from seeds"
+												: "Threshold(s)")
+								+ " for channel " + channelIDs[c]);
+						tp1.append("	Not segmented	every voxel has the same value after preprocessing (no signal)");
+						clearChannel(procImp, channelIDs[c], 0);
+						tempImp.changes = false;
+						tempImp.close();
+						continue;
+					}
+		   			
 		   			if(chosenAlgorithms [c].equals("CANNY 3D")){
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with CANNY 3D ...");
 		   				try {
@@ -852,6 +894,17 @@ public void run(String arg) {
 		   				progress.updateBarText("Segment channel " + channelIDs [c] + " with HYSTERESIS threshold ...");
 		   				tp1.append("Hysteresis threshold(s) for channel " + channelIDs [c]);
 		   				thresholdsHyst = getHysteresisThresholds(tempImp, c, separateTimesteps [c], progress);
+		   				
+		   				// New in V0.2.1: a time step without signal gets no threshold (+Infinity), see flatParts and segmentUsingHysteresis
+		   				if(separateTimesteps [c]){
+		   					boolean [][] flatHyst = flatParts(tempImp, thresholdsHyst.length, 1, channelIDs [c], task, progress);
+		   					for(int t = 0; t < thresholdsHyst.length; t++) {
+		   						if(flatHyst [t][0]) {
+		   							thresholdsHyst [t] = new double [] {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY};
+		   						}
+		   					}
+		   				}
+		   				
 			   			tp1.append("	Time step #	Low Threshold	High Threshold");
 			   			for(int t = 0; t < procImp.getNFrames(); t++){
 		   					tp1.append("	" + df0.format(t+1) + "	" + df3.format(thresholdsHyst[t][0]) + "	" + df3.format(thresholdsHyst[t][1]));				
@@ -1014,7 +1067,11 @@ public void run(String arg) {
 		   				ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result [][] fres =
 		   						getFractionThresholds(tempImp, fractionSettings [c], localMethod,
 		   								chosenStackMethods [c], separateTimesteps [c], progress);
+		   				
+		   				// Parts without signal are not segmented
+		   				boolean [][] fFlat = flatParts(tempImp, fres.length, fres [0].length, channelIDs [c], task, progress);
 		   				boolean fPerSlice = chosenStackMethods [c].equals(STACK_PER_SLICE);
+		   				
 		   				if(fPerSlice)					tp1.append("	Time step #	Slice #	Threshold");
 		   				else if(separateTimesteps [c])	tp1.append("	Time step #	Threshold");
 		   				for(int t = 0; t < procImp.getNFrames(); t++){
@@ -1043,6 +1100,14 @@ public void run(String arg) {
 		   									+ (localMethod ? "	(local " + df3.format(r.surfaceMin) + " - "
 		   											+ df3.format(r.surfaceMax) + ")" : ""));
 		   						}
+		   						
+		   						if(fFlat [fres.length == 1 ? 0 : Math.min(t, fres.length-1)][row.length == 1 ? 0 : Math.min(sl, row.length-1)]){
+		   							// No signal
+		   							this.segmentImage(procImp, Double.POSITIVE_INFINITY, procImp.getStackIndex(channelIDs [c], sl+1, t+1)-1,
+		   									tempImp, tempImp.getStackIndex(1, sl+1, t+1)-1);
+		   							continue;
+		   						}
+		   						
 		   						this.segmentImageWithSurface(procImp, r,
 		   								procImp.getStackIndex(channelIDs [c], sl+1, t+1)-1,
 		   								tempImp, tempImp.getStackIndex(1, sl+1, t+1)-1);
@@ -1064,11 +1129,20 @@ public void run(String arg) {
 			   				thr2 = new double [procImp.getNFrames()][1];
 			   				for(int t = 0; t < thr2.length; t++)	thr2 [t][0] = customThr [c];
 			   			}
+
+						// New in V0.2.1: a part without signal gets no threshold (+Infinity, nothing segmented), see flatParts;
+						boolean[][] flatThr = flatParts(tempImp, thr2.length, thr2[0].length, channelIDs[c], task,
+								progress);
+						for (int g = 0; g < thr2.length; g++)
+							for (int s = 0; s < thr2[g].length; s++)
+								if (flatThr[g][s])
+									thr2[g][s] = Double.POSITIVE_INFINITY;
+
 			   			threshold = thr2 [0][0];
 			   			if(perSlice && !chosenAlgorithms [c].equals("CUSTOM threshold")){
 			   				tp1.append("	Time step #	Slice #	Threshold");
 			   			}else if(chosenAlgorithms [c].equals("CUSTOM threshold") || !separateTimesteps [c]){
-			   				tp1.append("	All timesteps:	" + df3.format(threshold));
+			   				tp1.append("	All timesteps:	" + df3.format(chosenAlgorithms [c].equals("CUSTOM threshold") ? customThr [c] : threshold));
 			   			}else{
 			   				tp1.append("	Time step #	Threshold");
 			   			}
@@ -1304,7 +1378,16 @@ public void run(String arg) {
 	   				ci.setDisplayRange(0, max);
 	   			}
 	   			
-				IJ.saveAsTiff(ci, filePrefix + ".tif");
+				if(!IJ.saveAsTiff(ci, filePrefix + ".tif")){
+					// New in V0.2.1: no report without its image (see the catch after the task loop)
+					throw new java.io.IOException("the output image could not be saved as " + filePrefix + ".tif");
+				}
+				
+				// New in V0.2.1: the .tif is saved - from here on, a failure still writes this report, marked as failed.
+				// The old report goes now: should the new one fail, no old report describes the new image.
+				reportPath = filePrefix + ".txt";
+				new java.io.File(reportPath).delete();
+
 				procImp.changes = false;
 		   		procImp.close();
 		   		tempImp.changes = false;
@@ -1312,32 +1395,86 @@ public void run(String arg) {
 				ci.changes = false;
 				ci.close();	   			
 		   	}else{
-				IJ.saveAsTiff(procImp, filePrefix + ".tif");	
+				if(!IJ.saveAsTiff(procImp, filePrefix + ".tif")){
+					// New in V0.2.1: no report without its image (see the catch after the task loop)
+					throw new java.io.IOException("the output image could not be saved as " + filePrefix + ".tif");
+				}
+				// New in V0.2.1: the .tif is saved - from here on, a failure still writes this report, marked as failed.
+				// The old report goes now: should the new one fail, no old report describes the new image.
+				reportPath = filePrefix + ".txt";
+				new java.io.File(reportPath).delete();
+
 				procImp.changes = false;
 				procImp.close();
 		   	}
 		   	
-		   	appendNotes(tp1, task + 1);	// New V0.2.1: Write every NOTE and ERROR of this image, as shown during the run, into the txt file
-		   	addFooter(tp1, startDate);				
-			writeTextFile(filePrefix + ".txt", tp1.getText()); //tp1.saveAs(filePrefix + ".txt"); Switched to java-based writing to avoid macro notion
+			// New V0.2.1: Write every NOTE and ERROR of this image, as shown during the run, into the txt file
+		   	appendNotes(tp1, task + 1);
+		   	
+		   	addFooter(tp1, startDate);
+		   	
+			// New in V0.2.1: the report is complete only if it was written - a later failure must not replace it
+			reportWritten = writeTextFile(filePrefix + ".txt", tp1.getText());
+			if(!reportWritten)	warnIfOldReportStays(filePrefix + ".txt", task);
+
 
 			progress.updateBarText("Finished ...");
 		   
 			
-			System.gc();
-		/******************************************************************
-		*** 							Finish							***	
-		*******************************************************************/			
-			{
-				imp.unlock();	
+			/******************************************************************
+			*** 							Finish							***	
+			*******************************************************************/	
+			System.gc();		
+			processingDone = true;
+			break running;				
+		}}catch(Throwable e){
+			// New in V0.2.1: a cancelled macro or a stopped thread ends the run, after the clean-up below
+			rethrowIfRunEnds(e);
+			// New in V0.2.1: reported after the clean-up, which first frees the work copies (after an OutOfMemoryError,
+			// the report needs that memory)
+			failure = e;
+		}finally{
+			/*	New in V0.2.1: one clean-up per image, after success and failure alike. It closes only what this task opened or
+			 *	created - the work copies, and the input when it was opened from a file or copied from a virtual stack - never
+			 *	the user's own open images. */
+			closeAfterTask(tempImp);
+			closeAfterTask(procImp);
+			if(imp != null){
+				imp.unlock();
 				if(selectedTaskVariant.equals(taskVariant[1]) || isVirtual){
-					imp.changes = false;
-					imp.close();
+					closeAfterTask(imp);
 				}
-				processingDone = true;
-				break running;
-			}				
-		}	
+			}
+		}
+		if(failure != null){
+			/*
+			 * New in V0.2.1: an error in one image no longer ends the batch. Before this,
+			 * the task loop had no catch, so an uncaught exception or error (e.g.
+			 * OutOfMemoryError) skipped every remaining image without a message. A report
+			 * is written only for a saved image (reportPath) whose report is not complete
+			 * yet (reportWritten): a new .txt next to an old .tif would describe the wrong
+			 * image. Reported after the clean-up, in its own try: if reporting fails as
+			 * well, the batch still goes on.
+			 */
+			try{
+				String outcome = " This image was not processed - no output was written.";
+				if(reportWritten)	outcome = " The image and its report were saved before the error.";
+				else if(reportPath != null)	outcome = " The image was saved, but its report could not be completed - the report says so.";
+				progress.notifyMessage("Task " + (task + 1) + "/" + tasks + ": processing failed (" + failure + ")." + outcome
+						+ "\nDetailed message:\n" + stackTraceToString(failure), ProgressReporter.ERROR);
+				if(reportPath != null && !reportWritten){
+					if(!writeTextFile(reportPath,
+							"Processing of " + name[task] + " FAILED after the image was saved, so this report is incomplete."
+									+ "\nError: " + failure + "\n" + stackTraceToString(failure))){
+						warnIfOldReportStays(reportPath, task);
+					}
+				}
+			}catch(Throwable e){
+				rethrowIfRunEnds(e);
+				// e.g. out of memory again: the batch still goes on
+				IJ.log(PLUGIN_NAME + ": task " + (task+1) + " failed (" + failure + "), and the failure could not be reported (" + e + ").");
+			}
+		}
 		progress.updateBarText("finished!");
 		progress.setBar(1.0);
 		progress.moveTask(task);
@@ -2675,7 +2812,7 @@ private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_de
 	/*
 	 * The simple keys are always read. The ADVANCED keys are honoured only when
 	 * actually present: if any of them is given, advancedOverride is set so
-	 * deriveFrom() will not recompute over the top of it. Without that, a macro
+	 * deriveFromRange() will not recompute over the top of it. Without that, a macro
 	 * could not pin sigma/thresholds at all.
 	*/
 	rs.lineWidth = macroDouble(options, key + "width", rs.lineWidth);
@@ -3170,24 +3307,26 @@ private void appendNotes(TextCollector tp, int task){
 	}
 }
 
-private void addFooter(TextCollector tp, Date currentDate){
+private void addFooter(TextCollector tp, Date currentDate) {
 	tp.append("");
-	tp.append("Datafile was generated on " + FullDateFormatter2.format(currentDate) + " by '"
-			+PLUGIN_NAME+"', an ImageJ plug-in by Jan Niklas Hansen (jan.hansen@uni-bonn.de, https://github.com/hansenjn/CiliaQ_Preparator).");
-	tp.append("The plug-in '"+PLUGIN_NAME+"' is distributed in the hope that it will be useful,"
+	tp.append("Datafile was generated on " + FullDateFormatter2.format(currentDate) + " by '" + PLUGIN_NAME
+			+ "', an ImageJ plug-in by Jan Niklas Hansen (jan.hansen@uni-bonn.de, https://github.com/hansenjn/CiliaQ_Preparator).");
+	tp.append("The plug-in '" + PLUGIN_NAME + "' is distributed in the hope that it will be useful,"
 			+ " but WITHOUT ANY WARRANTY; without even the implied warranty of"
 			+ " MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.");
-	tp.append("Plug-in version:	V"+PLUGIN_VERSION);
-	tp.append("ImageJ version:	" + IJ.getFullVersion());   // NEW in V0.2.0
-		
+	tp.append("Plug-in version:	V" + PLUGIN_VERSION);
+	tp.append("ImageJ version:	" + IJ.getFullVersion()); // NEW in V0.2.0
+
 	// From V0.2.1 - provenance for 3D ImageJ Suite reproducibility (used by Canny 3D and Hysteresis).
 	// Recorded only when a method that relies on it was selected; thresholding behaviour can change between versions.
 	boolean any3DSuite = false;
-	for(int c = 0; c < channelIDs.length; c++)
-	    if("CANNY 3D".equals(chosenAlgorithms[c])
-	       || "HYSTERESIS threshold".equals(chosenAlgorithms[c])) { any3DSuite = true; break; }
-	if(any3DSuite)
-	    tp.append("3D ImageJ Suite version:	" + mcib3dVersion());
+	for (int c = 0; c < channelIDs.length; c++)
+		if ("CANNY 3D".equals(chosenAlgorithms[c]) || "HYSTERESIS threshold".equals(chosenAlgorithms[c])) {
+			any3DSuite = true;
+			break;
+		}
+	if (any3DSuite)
+		tp.append("3D ImageJ Suite version:	" + mcib3dVersion());
 }
 
 /**
@@ -3556,6 +3695,76 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 }
 
 /**
+ * New in V0.2.1: true if every voxel of a single-channel image has the same
+ * value, NaN ignored, within one time step and slice (1-based; 0 = all). Such
+ * data carry no signal: every automatic threshold falls on that one value, and
+ * a binary output floods, since a voxel is removed only if it lies below the
+ * threshold.
+ */
+private static boolean isFlat(ImagePlus imp, int frame, int slice) {
+	float first = Float.NaN, v;
+	for (int t = (frame == 0 ? 1 : frame); t <= (frame == 0 ? imp.getNFrames() : frame); t++) {
+		for (int s = (slice == 0 ? 1 : slice); s <= (slice == 0 ? imp.getNSlices() : slice); s++) {
+			ij.process.ImageProcessor ip = imp.getStack().getProcessor(imp.getStackIndex(1, s, t));
+			for (int i = 0; i < ip.getPixelCount(); i++) {
+				v = ip.getf(i);
+				if (v != v)
+					continue; // NaN
+				if (first != first)
+					first = v;
+				else if (v != first)
+					return false;
+			}
+		}
+	}
+	return true;
+}
+
+/**
+ * New in V0.2.1: which parts of a channel that get a threshold of their own
+ * carry no signal (isFlat), in the layout of the thresholds, [time
+ * step][slice]: one row when time steps are pooled, one entry per row unless
+ * per slice. Each such part is reported; the caller then segments nothing
+ * there. Only parts whose threshold is taken from and applied to exactly that
+ * data are checked: one threshold for the whole channel is covered by the check
+ * before segmentation, and with per-slice thresholds pooled over several time
+ * steps a slice threshold applies to all of them, so none is emptied.
+ */
+private boolean[][] flatParts(ImagePlus imp, int nGroups, int nPerGroup, int channelID, int task,
+		ProgressReporter progress) {
+	boolean[][] flat = new boolean[nGroups][nPerGroup];
+	if (nGroups == 1 && (nPerGroup == 1 || imp.getNFrames() > 1))
+		return flat;
+	for (int g = 0; g < nGroups; g++) {
+		for (int s = 0; s < nPerGroup; s++) {
+			flat[g][s] = isFlat(imp, g + 1, nPerGroup == 1 ? 0 : s + 1);
+			if (flat[g][s]) {
+				progress.notifyMessage("Task " + (task + 1) + "/" + tasks + ", channel " + channelID + ": "
+						+ (nPerGroup == 1 ? "time step " + (g + 1)
+								: "slice " + (s + 1) + (nGroups > 1 ? " of time step " + (g + 1) : ""))
+						+ " has the same value in every voxel after preprocessing (no signal) - nothing was segmented there.",
+						ProgressReporter.NOTIFICATION);
+			}
+		}
+	}
+	return flat;
+}
+
+/**
+ * New in V0.2.1: set a channel of the output image to 0 (nothing segmented), in
+ * one time step (1-based) or in all (0).
+ */
+private static void clearChannel(ImagePlus imp, int channel, int frame) {
+	for (int t = (frame == 0 ? 1 : frame); t <= (frame == 0 ? imp.getNFrames() : frame); t++) {
+		for (int s = 1; s <= imp.getNSlices(); s++) {
+			ij.process.ImageProcessor ip = imp.getStack().getProcessor(imp.getStackIndex(channel, s, t));
+			for (int i = 0; i < ip.getPixelCount(); i++)
+				ip.setf(i, 0f);
+		}
+	}
+}
+
+/**
  *	2D median filter, per slice, in place.
  *
  *	ij.plugin.filter.RankFilters with MEDIAN. 2D per slice is sufficient: the noise being removed
@@ -3695,19 +3904,22 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 		if(es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE)){
 			ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = es.toRidgeSettings();
 			double [] st = medianAndHighPercentile(selectedImp);
-			rs.deriveFrom(st [0], st [3], st [1]);
+			SignalRange sr = new SignalRange(selectedImp, writeImp, channelWriteImp, t+1, rs.darkLine);
+			rs.deriveFromRange(sr.range);
 			String reject = rs.rejectionReason(st [2]);
 			if(reject != null) throw new SettingsRejectedException("Expansion seed detection: " + reject);
 			
 			if(rs.upperThreshold <= 1e-6){
 				throw new SettingsRejectedException("Expansion seed detection: the upper threshold is ~0 ("
-					+ String.format(java.util.Locale.US, "%.3g", rs.upperThreshold) + ")."
+					+ String.format(java.util.Locale.US, "%.3g", rs.upperThreshold) + ", signal range " + df3.format(sr.range) + ")."
 					+ " On background-free data the line detector may trace noise and may not finish."
 					+ " If so, raise 'contrast sensitivity', or check whether the channel carries filamentous signal.");
 			}
 			
 			tp1.append("	Ridge seeds, derived for frame " + (t+1) + "	median " + df3.format(st [0])
 				+ ", p99.9 " + df3.format(st [1]) + ", p0.1 " + df3.format(st [3]) + ", MAD " + df3.format(st [2])
+				+ ", signal range (median of tiles) " + df3.format(sr.range) + " [" + sr.tileList(df3)
+				+ " - g = grid, s = shifted grid, (...) = left out]"
 				+ ", sigma " + df3.format(rs.sigma) + ", upper " + df6.format(rs.upperThreshold)
 				+ ", lower " + df6.format(rs.lowerThreshold)
 				+ (rs.advancedOverride ? " (set by user)" : " (derived)"));
@@ -3722,6 +3934,9 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 			
 			ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.Result rr =
 					ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rs, progress);
+			if(rr.failedPlanes > 0){
+				tp1.append("	Ridge seeds, frame " + (t+1) + ": ridge detection FAILED on " + rr.failedPlanes + " plane(s), counted as empty");
+			}
 			seeds = sg.seedsFromRidges(rr, mask);
 		}else if(es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_SPOT)){
 			ciliaQ_Prep_jnh.spot_detection.SpotSettings spotSet = es.toSpotSettings();
@@ -3769,9 +3984,9 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 }
 
 /**
- * Median, 99.9th and 0.1th percentile, and MAD of a whole stack, as ridge detection needs them.
- * Factored out of segmentUsingRidgeDetection so the expansion tool derives its ridge seed thresholds
- * from exactly the same statistics - two copies would drift apart.
+ * Median, 99.9th and 0.1th percentile, and MAD of a whole stack: for the report, and the MAD for the noise check in
+ * RidgeSettings.rejectionReason (the thresholds come from CiliaQPrepStatistics.SignalRange). Used by ridge detection
+ * and the ridge seeds alike, so both report and check the same statistics - two copies would drift apart.
  *
  * @return { median, p99.9, MAD, p0.1 }
  */
@@ -3803,33 +4018,38 @@ private double [] medianAndHighPercentile(ImagePlus channelImp){
  *  - it ignores keepIntensities, because a voxel cannot carry both its intensity and its object ID.
  *    That is reported rather than silently applied.
  *
- * The thresholds are derived HERE, from stack-wide statistics, and not in the settings dialog: a dialog
- * listener never fires in macro or headless mode, so deriving there would give every optimizer run
- * unconverted defaults.
+ * The thresholds are derived HERE, from the signal range of the channel (CiliaQPrepStatistics.SignalRange), and
+ * not in the settings dialog: a dialog listener never fires in macro or headless mode, so deriving there would give
+ * every optimizer run unconverted defaults.
  */
 private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressReporter progress,
 		ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs, ImagePlus writeImp, int channelWriteImp,
 		int channelIndex, TextCollector tp1) throws Exception {
 
 	/*
-	 * Stack-wide statistics, computed ONCE. Deriving per slice made line counts vary by two orders of
-	 * magnitude between adjacent planes, which is threshold inconsistency rather than structure and
-	 * breaks z-linking.
+	 * Stack-wide statistics, computed ONCE: the median, percentiles and MAD for the report and the noise check, and
+	 * the signal range below, whose tiles run through all planes. On example images, deriving them per slice made
+	 * line counts vary by two orders of magnitude between adjacent planes. Since adjacent planes hold nearly the same
+	 * structure, this variation is threshold inconsistency rather than structure, and it breaks z-linking.
 	 */
 	double [] st = medianAndHighPercentile(channelImp);
 	double median = st [0], p999 = st [1], mad = st [2], p001 = st [3];
 
-	rs.deriveFrom(median, p001, p999);
+	/*	The range comes from tiles (median of the whole stack, a 3x3 grid and the shifted grid), not from the
+	 *	whole stack alone, so one bright artefact or a cilium that fills a small image cannot move it. See SignalRange. */
+	SignalRange sr = new SignalRange(channelImp, writeImp, channelWriteImp, 1, rs.darkLine);
+	rs.deriveFromRange(sr.range);
 	String reject = rs.rejectionReason(mad);
+
 	if(reject != null) throw new SettingsRejectedException(reject);
 	
 	// Additional check: near-zero upper threshold means the detector will trace noise and can hang. The
 	// MAD guard above misses this on background-free data (MAD = 0), so catch it here, before detection.
 	if(rs.upperThreshold <= 1e-6){
-		throw new SettingsRejectedException("ridge detection: the derived upper threshold is ~0 for this channel"
-				+ " (median " + df3.format(median) + ", MAD " + df3.format(mad) + "), so the detector"
-				+ " may trace noise and may not finish. If so, raise 'contrast sensitivity', or check whether"
-				+ " the channel carries filamentous signal.");
+		throw new SettingsRejectedException("ridge detection: the derived upper threshold is ~0 for this channel "
+				+ "(median " + df3.format(median) + ", MAD " + df3.format(mad) + ", signal range " + df3.format(sr.range) + "), "
+				+ "so ridge detection was not run: the detector would trace noise and might not finish. "
+				+ "Raise 'contrast sensitivity', or check whether the channel carries filamentous signal.");
 	}
 	
 	tp1.append("Ridge detection for channel " + channelWriteImp);
@@ -3837,6 +4057,10 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 	tp1.append("	Channel p0.1	" + df3.format(p001));
 	tp1.append("	Channel p99.9	" + df3.format(p999));
 	tp1.append("	Channel MAD	" + df3.format(mad));
+	tp1.append("	Signal range (median of tiles)	" + df3.format(sr.range));
+	tp1.append("	Signal range tiles (legend)	whole = whole stack; g1-g9 = 3x3 grid, row by row; s1-s9 = the same grid"
+			+ " shifted by half a tile; (...) = left out (no positive voxel in the raw channel)");
+	tp1.append("	Signal range per tile	" + sr.tileList(df3));
 	tp1.append(rs.report().replaceAll("\n$", ""));
 
 	if(keepIntensities){
@@ -3860,6 +4084,7 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 			new ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.Result [channelImp.getNFrames()];
 	int maxObjects = 0;
 	boolean anyWrapped = false;
+	int failedPlanes = 0;	// planes on which the detector failed, over all frames
 	for(int t = 0; t < channelImp.getNFrames(); t++){
 		if(keepAwake) stayAwake();
 		progress.updateBarText("Ridge detection on channel " + channelWriteImp + ", frame " + (t+1) + " ...");
@@ -3867,10 +4092,14 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 		res [t] = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rs, progress);
 		maxObjects = Math.max(maxObjects, res [t].nObjects);
 		anyWrapped = anyWrapped || res [t].wrapped;
+		failedPlanes += res [t].failedPlanes;
 		selectedImp.changes = false;
 		selectedImp.close();
 	}
 	tp1.append("	Detected filaments (max over frames)	" + maxObjects);
+	if(failedPlanes > 0){
+		tp1.append("	Planes where ridge detection FAILED (counted as empty)	" + failedPlanes);
+	}
 	if(anyWrapped){
 		progress.notifyMessage("Channel " + channelWriteImp + ": more than " 
 				+ ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.MAX_LABEL
@@ -3880,7 +4109,7 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 
 	/*
 	 * DO NOT promote or write here. Both are deferred to finishPendingLabels(), called once after
-	 * every channel has been segmented, see finishPendingLabels for why
+	 * every channel has been segmented. See finishPendingLabels() for why.
 	 */
 	tp1.append("	Labels will be written after all channels are segmented (bit depth decided then)");
 	pendingRidgeLabels [channelIndex] = res;
@@ -4069,6 +4298,14 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressReporter progr
 		/*
 		 * Convert to bin
 		 * */			
+		if(thresholds [t][1] == Double.POSITIVE_INFINITY){
+			// New in V0.2.1: a time step without signal (see flatParts): nothing is segmented there
+			selectedImp.changes = false;
+			selectedImp.close();
+			clearChannel(writeImp, channelWriteImp, t+1);
+			progress.addToBar(0.8/(double)(channelImp.getNFrames()));
+			continue;
+		}
 		selectedImp = doHysteresisThreshold(selectedImp, progress, thresholds [t]);
 		
 		/*
@@ -4124,8 +4361,13 @@ private ImagePlus doHysteresisThreshold(ImagePlus imp, ProgressReporter pD, doub
 		imp.hide();
 		ij.macro.Interpreter.removeBatchModeImage(bin);
 		return bin;
-	}catch(RuntimeException e){
-		if(bin != null){ bin.changes = false; bin.close(); }
+	}catch(Throwable e){
+		// New in V0.2.1: Throwable, not only RuntimeException, so an Error cleans up too; rethrown unchanged
+		imp.hide();	// New in V0.2.1: imp.show() registered it as a batch-mode image
+		if(bin != null && bin != imp){
+			bin.changes = false;
+			bin.close();
+		}
 		throw e;
 	}finally{
 		ij.macro.Interpreter.batchMode = previousBatch;
@@ -4330,7 +4572,8 @@ private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impT
 	for(int x = 0; x < imp.getWidth(); x++){
 		for(int y = 0; y < imp.getHeight(); y++){
 			double pxintensity = impTemp.getStack().getVoxel(x,y,zTemp);
-			if(pxintensity < threshold){
+			// New in V0.2.1: +Infinity (a part without signal, flatParts) removes NaN voxels too: NaN < threshold is false
+			if(pxintensity < threshold || threshold == Double.POSITIVE_INFINITY){
 				imp.getStack().setVoxel( x, y, z, 0.0);
 			}else{
 				countSegmentedVoxel(imp, x, y, z);		// zero-intensity loss warning
@@ -4581,7 +4824,7 @@ private void readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jn
 	
 	/*	The Steger values are only present when they were overridden or already
 	 *	derived; when derived they were written for a PREVIOUS image, so they must
-	 *	not be restored - deriveFrom will recompute them for the new one. */
+	 *	not be restored - deriveFromRange will recompute them for the new one. */
 	if(rs.advancedOverride){
 		rs.sigma = blockDouble(kv, "Sigma", rs.sigma);
 		rs.upperThreshold = blockDouble(kv, "Upper threshold", rs.upperThreshold);
@@ -4600,8 +4843,8 @@ private void readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jn
 *	Uses mark/reset so the line that ends the block is put back for the outer loop to handle - without
 *	that, the sub-parser would swallow the next channel's header.
 *
-*	@param br  positioned just after the "Segmentation method:" line
-*	@return    text before the last tab (trimmed) -> text after it, for every indented line of the block
+*	@param br	positioned just after the "Segmentation method:" line
+*	@return		text before the last tab (trimmed) -> text after it, for every indented line of the block
 */
 private java.util.HashMap<String,String> readIndentedBlock(BufferedReader br) throws java.io.IOException {
 	java.util.HashMap<String,String> kv = new java.util.HashMap<String,String>();
@@ -4707,17 +4950,54 @@ private String indentReport(String report){
 }
 
 /** Write text straight to disk, bypassing ImageJ I/O (and the macro recorder). 
- * Added in version V0.2.0. */
-private void writeTextFile(String path, String text){
-	try{
-		java.io.FileWriter fw = new java.io.FileWriter(path);
-		java.io.BufferedWriter bw = new java.io.BufferedWriter(fw);
+ * Added in version V0.2.0. New in V0.2.1: returns whether the file was written, and always closes it. */
+private boolean writeTextFile(String path, String text){
+	try(java.io.BufferedWriter bw = new java.io.BufferedWriter(new java.io.FileWriter(path))){
+		// Closed even if writing fails, so the file is not left locked
 		if(text != null) bw.write(text);
-		bw.close();
-		fw.close();
+		return true;
 	}catch(java.io.IOException e){
 		progress.notifyMessage("Could not write metadata file '" + path + "': " + e.getMessage(),
 			ProgressReporter.ERROR);
+		return false;
+	}
+}
+
+/**
+ * New in V0.2.1: after an image's report could not be written. A file of that name that is still there is an earlier
+ * run's report that could not be removed after the save either (read-only, or open in another program on Windows),
+ * or a new one written only in part (e.g. a full disk). Either way it is not the complete report of the image just
+ * saved - say so.
+ */
+private void warnIfOldReportStays(String path, int task){
+	if(new java.io.File(path).exists()){
+		progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": " + path + " is not the complete report of the image just saved"
+				+ " (it could not be replaced or completed - read-only, open in another program, or the disk full?).", ProgressReporter.ERROR);
+	}
+}
+
+/**
+ * New in V0.2.1: passes on what must end the whole run, not just one image: a cancelled macro (Esc, or ImageJ stopping a
+ * macro after one of its own errors, RuntimeException "Macro canceled") and a stopped thread (ThreadDeath: Abort Macro,
+ * the Script Editor's Kill). Called first in every catch that would otherwise go on with the next image.
+ */
+private static void rethrowIfRunEnds(Throwable e){
+	if(e instanceof ThreadDeath)	throw (ThreadDeath) e;
+	if(e instanceof RuntimeException && ij.Macro.MACRO_CANCELED.equals(e.getMessage()))	throw (RuntimeException) e;
+}
+
+/**
+ * New in V0.2.1: closes an image after its task (a work copy, or the input the task opened). An error here must not
+ * end the batch, so it is logged; a cancelled macro or a stopped thread still ends the run.
+ */
+private static void closeAfterTask(ImagePlus imp){
+	if(imp == null)	return;
+	try{
+		imp.changes = false;
+		imp.close();
+	}catch(Throwable e){
+		rethrowIfRunEnds(e);
+		IJ.log(PLUGIN_NAME + ": could not close " + imp.getTitle() + " after its task (" + e + ").");
 	}
 }
 

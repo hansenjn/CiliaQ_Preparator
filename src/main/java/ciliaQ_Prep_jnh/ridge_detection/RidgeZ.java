@@ -86,7 +86,7 @@ public final class RidgeZ {
 	final List<float[]> J = new ArrayList<>(); // 3D: junctions {x, y, z}
 	final List<List<int[]>> slopeSeq = new ArrayList<>(); // 3D: per plane, the lines as 2D sees them, as point indices
 	final List<int[]> tracedPairs = new ArrayList<>();
-	int nTraced, nLinesTotal;
+	int nTraced, nLinesTotal, failedPlanes; // failedPlanes: planes on which the detector failed (they count as empty)
 	int[] par;
 	Map<Integer, Set<Integer>> forb, forbPar; // union-find and the kept-apart pairs (hard / soft) by root
 	final Map<Integer, Integer> longPiece = new HashMap<>(), armReach = new HashMap<>();
@@ -115,6 +115,7 @@ public final class RidgeZ {
 	static final class Output {
 		final int[][] labels;
 		final int nLines;
+		int failedPlanes;
 
 		Output(int[][] l, int n) {
 			labels = l;
@@ -130,7 +131,9 @@ public final class RidgeZ {
 			RidgeSegmenter.SlowWatchdog watchdog) {
 		RidgeZ r = new RidgeZ(imp, rs, threeD, progress);
 		int[][] lab = r.run(watchdog);
-		return new Output(lab, r.nLinesTotal);
+		Output o = new Output(lab, r.nLinesTotal);
+		o.failedPlanes = r.failedPlanes;
+		return o;
 	}
 
 	// ------------------------------------------------------------------ the method
@@ -156,10 +159,13 @@ public final class RidgeZ {
 				RidgeSegmenter.checkCap(ls.size(), W, H, z);
 			} catch (IllegalStateException overCap) {
 				throw overCap; // the safety cap is fatal for the whole channel
-			} catch (Throwable e) { // any other failure on one plane must not lose the others: the plane counts as
-									// empty
-				progress.notifyMessage("CiliaQ Preparator: ridge detection failed on plane " + (z + 1) + " - " + e,
-						ProgressReporter.NOTIFICATION);
+			} catch (Throwable e) { // any other failure on one plane must not lose the others: the plane counts as empty
+				if (e instanceof ThreadDeath) // New in V0.2.1: a stopped thread (Abort Macro, the Script Editor's Kill) ends the run
+					throw (ThreadDeath) e;
+				progress.notifyMessage("Ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
+						ProgressReporter.ERROR);
+				failedPlanes++;
+
 				if (twoDLines)
 					slopeSeq.add(new ArrayList<int[]>());
 				continue;
