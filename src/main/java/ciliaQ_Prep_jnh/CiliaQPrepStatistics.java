@@ -23,7 +23,9 @@ import ij.process.ImageProcessor;
 /**
  * New in V0.2.1: the image statistics of CiliaQ Preparator in one place, so every method computes them the same way.
  * 	- SignalRange: the signal range from tiles, for ridge detection and the ridge seeds;
- * 	- ExactRanks: exact percentiles of 32-bit values without storing them (used by SignalRange);
+ * 	- medianPercentilesMad: median, p99.9, MAD and p0.1 of a channel, for the ridge report and its noise check;
+ * 	- positiveQuantile: a percentile of the values above 0, for the spot detector's automatic minimum intensity;
+ * 	- ExactRanks: exact percentiles of 32-bit values without storing them (used by all of the above);
  * 	- rank: the value at a rank of a histogram of integer values.
  */
 public class CiliaQPrepStatistics {
@@ -53,11 +55,16 @@ public class CiliaQPrepStatistics {
 	public static final class SignalRange {
 	
 		public static final int TILES = 19;
+		
+		/** The legend of tileList, for the reports of ridge detection and the ridge seeds (once per channel). */
+		public static final String TILE_LEGEND = "whole = whole stack; g1-g9 = 3x3 grid, row by row; s1-s9 = the same grid"
+				+ " shifted by half a tile; (...) = left out (no positive voxel in the raw channel)";
 	
 		/** The median of the kept tile ranges: the value the thresholds are derived from. */
 		public final double range;
 	
-		/** Per tile: 0 = whole stack, 1-9 = grid, 10-18 = shifted grid (row by row); NaN where the tile does not exist. */
+		/** Per tile: 0 = whole stack, 1-9 = grid, 10-18 = shifted grid (row by row); NaN where the tile does not exist,
+		 *	it has no number as its range (every voxel NaN, Infinity - Infinity, or Infinity). */
 		public final double [] tileRange = new double [TILES];
 	
 		/** Per tile: false where it was left out (no positive raw voxel) or does not exist. */
@@ -116,6 +123,7 @@ public class CiliaQPrepStatistics {
 				for(int t = 0; t < TILES; t++)	if(exists [t])	hist [t] = new long [65536];
 			}
 			ExactRanks er = integer ? null : new ExactRanks(TILES, 2);	// 32-bit: rank 0 = median, rank 1 = p99.9 (p0.1)
+			long [] nan = new long [TILES];	// Per tile, the NaN voxels of a 32-bit channel, left out of its ranks
 			boolean [] positive = new boolean [TILES];
 	
 			ImageProcessor p, r;
@@ -125,6 +133,7 @@ public class CiliaQPrepStatistics {
 				if(pass == 1){
 					for(int t = 0; t < TILES; t++){
 						if(!exists [t])	continue;
+						count [t] -= nan [t];	// the voxels that are numbers
 						er.locate(t, 0, count [t] / 2);
 						er.locate(t, 1, (long)(count [t] * q));
 					}
@@ -144,13 +153,21 @@ public class CiliaQPrepStatistics {
 								hist [t1][bin]++;
 								if(shifted)	hist [t2][bin]++;
 							}else if(pass == 0){
-								er.count(0, v);
-								er.count(t1, v);
-								if(shifted)	er.count(t2, v);
+								if(v != v){	// New in V0.2.1: NaN (e.g. 0/0 after Divide by Background) is left out, counted per tile
+									nan [0]++;
+									nan [t1]++;
+									if(shifted)	nan [t2]++;
+								}else{
+									er.count(0, v);
+									er.count(t1, v);
+									if(shifted)	er.count(t2, v);
+								}
 							}else{
-								er.refine(0, v);
-								er.refine(t1, v);
-								if(shifted)	er.refine(t2, v);
+								if(v == v){	// New in V0.2.1: NaN left out, as in pass 0
+									er.refine(0, v);
+									er.refine(t1, v);
+									if(shifted)	er.refine(t2, v);
+								}
 								continue;	// the raw channel was checked in pass 0
 							}
 							if(r.getf(i) > 0){	// tile 0 (whole stack) is always kept, so only the grid tiles need the flag
@@ -166,36 +183,171 @@ public class CiliaQPrepStatistics {
 			double p50, pEdge;
 			double [] keptRanges = new double [TILES];
 			int nKept = 0;
-			for(int t = 0; t < TILES; t++){
-				tileRange [t] = Double.NaN;
-				if(!exists [t] || count [t] == 0)	continue;
-				if(integer){
-					p50 = rank(hist [t], count [t] / 2);
-					pEdge = rank(hist [t], (long)(count [t] * q));
-				}else{
+			for (int t = 0; t < TILES; t++) {
+				tileRange[t] = Double.NaN;
+				if (!exists[t] || count[t] == 0)
+					continue;
+				if (integer) {
+					p50 = rank(hist[t], count[t] / 2);
+					pEdge = rank(hist[t], (long) (count[t] * q));
+				} else {
 					p50 = er.value(t, 0);
 					pEdge = er.value(t, 1);
 				}
-				tileRange [t] = darkLine ? p50 - pEdge : pEdge - p50;
-				kept [t] = t == 0 || positive [t];
-				if(kept [t])	keptRanges [nKept++] = tileRange [t];
+				tileRange[t] = darkLine ? p50 - pEdge : pEdge - p50;
+				kept[t] = (t == 0 || positive[t]) && Double.isFinite(tileRange[t]); // Only a tile with a finite range
+				if (kept[t])
+					keptRanges[nKept++] = tileRange[t];
 			}
 			java.util.Arrays.sort(keptRanges, 0, nKept);
-			range = nKept % 2 == 1 ? keptRanges [nKept / 2] : 0.5 * (keptRanges [nKept / 2 - 1] + keptRanges [nKept / 2]);
+			// No tile kept (every voxel NaN, or no tile with a finite range)
+			range = nKept == 0 ? Double.NaN
+					: nKept % 2 == 1 ? keptRanges[nKept / 2]
+							: 0.5 * (keptRanges[nKept / 2 - 1] + keptRanges[nKept / 2]);
 		}
 	
 		/** For the report: every tile's range, those left out in brackets, so padded or cleared areas can be found later. */
 		public String tileList(java.text.DecimalFormat df){
 			StringBuilder sb = new StringBuilder();
 			for(int t = 0; t < TILES; t++){
-				if(!exists [t])	continue;
-				if(sb.length() > 0)	sb.append("; ");
+				if (!exists[t])
+					continue;
+				if (sb.length() > 0)
+					sb.append("; ");
 				sb.append(t == 0 ? "whole " : (t < 10 ? "g" + t + " " : "s" + (t - 9) + " "));
-				String value = Double.isNaN(tileRange [t]) ? "NaN" : df.format(tileRange [t]);	// NaN: a 32-bit tile with NaN voxels
-				sb.append(kept [t] ? value : "(" + value + ")");
+				
+				String value = Double.isNaN(tileRange[t]) ? "NaN" : df.format(tileRange[t]);
+					// NaN: a 32-bit tile whose voxels are all NaN (or Infinity - Infinity)
+				
+				sb.append(kept[t] ? value : "(" + value + ")");
 			}
 			return sb.toString();
 		}
+	}
+
+	/**
+	 * Median, p99.9, MAD and p0.1 of a whole channel (every plane of every frame): for the ridge report,
+	 * and the MAD for its noise check (RidgeSettings.rejectionReason). The same values as sorting the voxels (the value
+	 * at rank (long)(n * q)), without storing them: sorting needed 12 bytes per voxel (a float and a double copy) and an
+	 * int count, which overflows from 2^31 voxels on. A histogram for 8- and 16-bit (exact), ExactRanks for 32-bit
+	 * (exact; the MAD in float precision, the precision of the voxels themselves). NaN voxels (e.g. 0/0 after Divide by
+	 * Background) are left out: the ranks are those of the voxels that are numbers, and a channel with only NaN gives
+	 * NaN. 8- and 16-bit channels have no NaN.
+	 *
+	 * @return { median, p99.9, MAD, p0.1 }
+	 */
+	public static double [] medianPercentilesMad(ImagePlus imp){
+		final int W = imp.getWidth(), H = imp.getHeight(), D = imp.getStackSize();
+		if (imp.getBitDepth() != 32) {
+			final long n = (long) W * H * D;
+			long[] hist = new long[65536];
+			for (int z = 1; z <= D; z++) {
+				ImageProcessor p = imp.getStack().getProcessor(z);
+				for (int i = 0; i < W * H; i++)
+					hist[Math.max(0, Math.min(65535, (int) p.getf(i)))]++;
+			}
+			double median = rank(hist, n / 2);
+			long[] dev = new long[65536]; // the absolute deviations from the median: whole numbers, too
+			for (int v = 0; v < 65536; v++)
+				dev[(int) Math.abs(v - median)] += hist[v];
+			return new double[] { median, rank(hist, (long) (n * 0.999)), rank(dev, n / 2),
+					rank(hist, (long) (n * 0.001)) };
+		}
+		
+		ExactRanks er = new ExactRanks(1, 3);
+		long m = 0; // the voxels that are numbers
+		for (int pass = 0; pass < 2; pass++) {
+			if(pass == 1){
+				if(m == 0) {
+					// No voxel is a number (all NaN): nothing to locate; NaN is returned below
+					break;
+				}				
+				er.locate(0, 0, m / 2);
+				er.locate(0, 1, (long) (m * 0.999));
+				er.locate(0, 2, (long) (m * 0.001));
+			}
+			for (int z = 1; z <= D; z++) {
+				ImageProcessor p = imp.getStack().getProcessor(z);
+				for (int i = 0; i < W * H; i++) {
+					float v = p.getf(i);
+					if (v != v)
+						continue; // NaN
+					if (pass == 0) {
+						er.count(0, v);
+						m++;
+					} else {
+						er.refine(0, v);
+					}
+				}
+			}
+		}
+		
+		if (m == 0)
+			return new double[] { Double.NaN, Double.NaN, Double.NaN, Double.NaN };
+		
+		double median = er.value(0, 0);
+		ExactRanks dev = new ExactRanks(1, 1); // the absolute deviations from the median
+		for (int pass = 0; pass < 2; pass++) {
+			if (pass == 1)
+				dev.locate(0, 0, m / 2);
+			for (int z = 1; z <= D; z++) {
+				ImageProcessor p = imp.getStack().getProcessor(z);
+				for (int i = 0; i < W * H; i++) {
+					float v = p.getf(i);
+					if (v != v)
+						continue; // NaN
+					float d = (float) Math.abs(v - median);
+					if (pass == 0)
+						dev.count(0, d);
+					else
+						dev.refine(0, d);
+				}
+			}
+		}
+		
+		return new double[] { median, er.value(0, 1), dev.value(0, 0), er.value(0, 2) };
+	}
+
+	/**
+	 * The value at the fraction q of the sorted values above 0 of a channel (rank (long)(m * q) of the m
+	 * values above 0; 0 if there are none), as sorting them gives it, without the list of every such value: the spot
+	 * detector's automatic minimum intensity boxed each one (about 16 bytes per voxel, 4 GB for a large stack).
+	 * A histogram for 8- and 16-bit, ExactRanks for 32-bit; NaN is not above 0, so it is left out, as before.
+	 */
+	public static double positiveQuantile(ImagePlus imp, double q){
+		final int W = imp.getWidth(), H = imp.getHeight(), D = imp.getStackSize();
+		final boolean integer = imp.getBitDepth() != 32;
+		long[] hist = integer ? new long[65536] : null;
+		ExactRanks er = integer ? null : new ExactRanks(1, 1);
+		long m = 0;
+		for (int pass = 0; pass < (integer ? 1 : 2); pass++) {
+			if (pass == 1) {
+				if(m == 0) {
+					// No value above 0: nothing to locate; 0 is returned below
+					break;
+				}
+				er.locate(0, 0, (long) (m * q));
+			}				
+			for (int z = 1; z <= D; z++) {
+				ImageProcessor p = imp.getStack().getProcessor(z);
+				for (int i = 0; i < W * H; i++) {
+					float v = p.getf(i);
+					if (!(v > 0f))
+						continue;
+					if (integer)
+						hist[Math.min(65535, (int) v)]++;
+					else if (pass == 0)
+						er.count(0, v);
+					else
+						er.refine(0, v);
+					if (pass == 0)
+						m++;
+				}
+			}
+		}
+		if (m == 0)
+			return 0.0;
+		return integer ? rank(hist, (long) (m * q)) : er.value(0, 0);
 	}
 
 	/** The value at 0-based rank k of a histogram of integer values. */

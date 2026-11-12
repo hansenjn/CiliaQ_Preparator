@@ -97,13 +97,81 @@ public class RidgeSegmenter {
 		public final int width, height, nSlices;
 		public final boolean wrapped;
 		public int failedPlanes;	// Planes on which the detector failed; they count as empty, and the report says how many
+		
 		Result(int[][] labels, int nObjects, int nLinesTotal, int w, int h, int d, boolean wrapped) {
 			this.labels = labels; this.nObjects = nObjects; this.nLinesTotal = nLinesTotal;
 			this.width = w; this.height = h; this.nSlices = d; this.wrapped = wrapped;
 		}
+
+		/** An empty result (no objects) for a time step that is not segmented. */
+		public static Result empty(int w, int h, int d) {
+			return new Result(new int[d][w * h], 0, 0, w, h, d, false);
+		}
 	}
 
 	// ------------------------------------------------------------------ detection
+
+	/**
+	 * New in V0.2.1
+	 * 
+	 * The image the line detector works on, with NaN, +Infinity and -Infinity set
+	 * to 0. Such values occur only in 32-bit channels, e.g. 0/0 and x/0 after
+	 * Divide by Background on an empty background. Since the detector's smoothing
+	 * spreads each of them over its whole neighbourhood, a few of them can blank
+	 * out a channel (on a test channel with 2 % NaN voxels: 0 filaments instead of
+	 * 4). Set to 0, they take the value of the empty background they come from. The
+	 * copy keeps the voxel size, which the z methods use, and the caller's image is
+	 * never changed. An image with only finite values, which includes every 8- and
+	 * 16-bit image, is returned as it is, so its results stay the same.
+	 */
+	static ImagePlus withoutNonFinite(ImagePlus imp) {
+		if (!hasNonFinite(imp))
+			return imp; // 8- and 16-bit images never hold such values
+		ImageStack st = imp.getStack(), copy = new ImageStack(st.getWidth(), st.getHeight());
+		for (int s = 1; s <= st.getSize(); s++) {
+			float[] p = ((float[]) st.getPixels(s)).clone();
+			for (int i = 0; i < p.length; i++) {
+				if (!Float.isFinite(p[i]))
+					p[i] = 0f; // NaN, +Infinity, -Infinity
+			}
+			copy.addSlice(st.getSliceLabel(s), new FloatProcessor(st.getWidth(), st.getHeight(), p));
+		}
+		ImagePlus out = new ImagePlus(imp.getTitle(), copy);
+		out.setDimensions(imp.getNChannels(), imp.getNSlices(), imp.getNFrames());
+		out.setCalibration(imp.getCalibration().copy());
+		return out;
+	}
+
+	/** New in V0.2.1: true if a voxel is NaN, +Infinity or -Infinity. Only 32-bit images can hold such values, so other
+	 *  images return false without reading their voxels; a 32-bit image is read only up to the first such voxel. */
+	static boolean hasNonFinite(ImagePlus imp) {
+		if (imp.getBitDepth() != 32) return false;
+		ImageStack st = imp.getStack();
+		for (int s = 1; s <= st.getSize(); s++) {
+			float[] p = (float[]) st.getPixels(s);
+			for (int i = 0; i < p.length; i++) {
+				if (!Float.isFinite(p[i])) return true;
+			}
+		}
+		return false;
+	}
+
+
+	/** @return The number of NaN voxels of an image (0 unless it is 32-bit);
+	 *	for the report's NaN note (CiliaQPrepMain.noteNaN)
+	 */
+	public static long countNaN(ImagePlus imp) {
+		if (imp.getBitDepth() != 32) return 0;
+		ImageStack st = imp.getStack();
+		long n = 0;
+		for (int s = 1; s <= st.getSize(); s++) {
+			float[] p = (float[]) st.getPixels(s);
+			for (int i = 0; i < p.length; i++) {
+				if (p[i] != p[i]) n++;
+			}
+		}
+		return n;
+	}
 
 	/**
 	 * Detect filaments in every plane of a single-channel, single-timepoint image and link them in z.
@@ -111,6 +179,12 @@ public class RidgeSegmenter {
 	 * returns a scratch array (the pattern the rest of the Preparator uses).
 	 */
 	public static Result detect(ImagePlus channelImp, RidgeSettings rs,  ProgressReporter progress) throws IllegalStateException {
+		/*
+		 * The detector works on a copy in which NaN and infinite voxels are 0 (see withoutNonFinite). Since every step
+		 * below reads channelImp, including the z methods and the clean-up rules, they all see the same values. An image
+		 * with only finite values is used as it is.
+		 */
+		channelImp = withoutNonFinite(channelImp);
 		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
 
 		// One warning per call (one timepoint) is enough; avoids spam if several planes are slow.

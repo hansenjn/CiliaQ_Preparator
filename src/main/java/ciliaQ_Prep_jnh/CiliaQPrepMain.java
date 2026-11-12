@@ -12,7 +12,7 @@ package ciliaQ_Prep_jnh;
 * GNU General Public License for more details.
 * 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 11, 2026)
+* Date: September 29, 2019 (This Version: November 12, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -56,9 +56,28 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	public static final Font INSTRUCTIONS_FONT = new Font("Sansserif", Font.ITALIC, 12);
 	public static final Font ROI_FONT = new Font("Sansserif", Font.PLAIN, 12);
 	
-	DecimalFormat df6 = new DecimalFormat("#0.000000");
-	DecimalFormat df3 = new DecimalFormat("#0.000");
-	DecimalFormat df0 = new DecimalFormat("#0");
+	DecimalFormat df6 = new DecimalFormat("#0.000000", reportSymbols(Locale.getDefault(Locale.Category.FORMAT)));	// New in V0.2.1: reportSymbols
+	DecimalFormat df3 = new DecimalFormat("#0.000", reportSymbols(Locale.getDefault(Locale.Category.FORMAT)));
+	DecimalFormat df0 = new DecimalFormat("#0", reportSymbols(Locale.getDefault(Locale.Category.FORMAT)));
+
+	/** New in V0.2.1: the number symbols of a locale, with NaN and infinity written as "NaN" and "Infinity". Java's own
+	 *  symbols for them (U+FFFD, the replacement character, and the infinity sign) are not ASCII: NaN showed as a
+	 *  replacement character in the report, and on Windows the infinity sign cannot be written at all. */
+	static DecimalFormatSymbols reportSymbols(Locale locale){
+		DecimalFormatSymbols s = new DecimalFormatSymbols(locale);
+		s.setNaN("NaN");
+		s.setInfinity("Infinity");
+		return s;
+	}
+
+	/** New in V0.2.1: the number format of the report and its symbols (one of nrFormats), as read from a settings file. */
+	void setNumberFormat(String format){
+		ChosenNumberFormat = format;
+		Locale l = format.equals(nrFormats [1]) ? Locale.GERMANY : Locale.US;
+		df6.setDecimalFormatSymbols(reportSymbols(l));
+		df3.setDecimalFormatSymbols(reportSymbols(l));
+		df0.setDecimalFormatSymbols(reportSymbols(l));
+	}
 	
 	static SimpleDateFormat NameDateFormatter = new SimpleDateFormat("yyMMdd_HHmmss");
 	static SimpleDateFormat FullDateFormatter = new SimpleDateFormat("yyyy-MM-dd	HH:mm:ss");
@@ -300,13 +319,13 @@ public void run(String arg) {
 		chosenOutputName = gd.getNextChoice();	
 		ChosenNumberFormat = gd.getNextChoice();
 		if(ChosenNumberFormat.equals(nrFormats[0])){ //US-Format
-			df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-			df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-			df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+			df6.setDecimalFormatSymbols(reportSymbols(Locale.US));
+			df3.setDecimalFormatSymbols(reportSymbols(Locale.US));
+			df0.setDecimalFormatSymbols(reportSymbols(Locale.US));
 		}else if (ChosenNumberFormat.equals(nrFormats[1])){
-			df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-			df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-			df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+			df6.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
+			df3.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
+			df0.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
 		}
 		keepAwake = gd.getNextBoolean();
 		
@@ -1039,7 +1058,8 @@ public void run(String arg) {
 		   								+ "	" + df3.format(mn) + " - " + df3.format(mx));
 		   						this.segmentImageWithSurface(procImp, surf, tempImp.getWidth(), 0.0,
 		   								procImp.getStackIndex(channelIDs [c], sl+1, t+1)-1,
-		   								tempImp, tempIdx);
+		   								tempImp, tempIdx,
+		   								true);	// Strict, see segmentImageWithSurface
 		   					}
 		   				}
 		   				tempImp.changes = false;
@@ -1292,7 +1312,7 @@ public void run(String arg) {
 			   						copyStr = "Channel " + (c+1) + " S" + (s+1) + "/" + procImp.getNSlices() 
 		   							+  " T" + (f+1) + "/" + procImp.getNFrames();
 			   					}				   					
-			   					tempImp.getStack().setSliceLabel("segm " + copyStr, indexNew+1);
+			   					tempImp.getStack().setSliceLabel((isLabelChannel [c] ? SEGM_LABELS_MARK : SEGM_MARK) + copyStr, indexNew+1);	// New in V0.2.1: label channels marked as such (CiliaQ's label mode)
 		   					}
 						}
 						
@@ -1395,6 +1415,8 @@ public void run(String arg) {
 				ci.changes = false;
 				ci.close();	   			
 		   	}else{
+				/*	New in V0.2.1: Mark the segmented channels in the slice label*/
+				markSegmentedChannels(procImp, imp);
 				if(!IJ.saveAsTiff(procImp, filePrefix + ".tif")){
 					// New in V0.2.1: no report without its image (see the catch after the task loop)
 					throw new java.io.IOException("the output image could not be saved as " + filePrefix + ".tif");
@@ -1561,6 +1583,14 @@ private boolean importSettings() {
 				}
 			}catch(Exception e){
 				break reading;
+			}
+			
+			if(line.contains("Number format:")) {
+				// New in V0.2.1: the number format the file was written with (older files keep the current one)
+				for(int i = 0; i < nrFormats.length; i++){
+					if(line.contains(nrFormats [i]))	setNumberFormat(nrFormats [i]);
+				}
+				logImport("Number format = " + ChosenNumberFormat);
 			}
 			
 			if(line.contains("Segmentation style")) {
@@ -2762,13 +2792,21 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 			ok = false;
 		}
 	}
-	// Stack handling mismatches are a very common and completely silent user error.
+	// Warn about stack handling mismatches.
 	for(int c = 0; c < channelIDs.length; c++){
 		if(chosenAlgorithms [c].equals("CANNY 3D")) continue;
-		if(imp.getNSlices() > 1 && chosenStackMethods [c].equals(STACK_NO_STACK)){
+		
+		/*	The stack-handling notes only for the methods that read the stack-handling choice: a custom
+		 *	threshold, PHANSALKAR (always per slice), RIDGE and SPOT detection (always the whole stack) ignore it. */
+		boolean usesStackChoice = !(chosenAlgorithms [c].equals("CUSTOM threshold") || chosenAlgorithms [c].equals(RIDGE_DETECTION)
+				|| chosenAlgorithms [c].equals(SPOT_DETECTION) || ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c]));
+		
+		if(usesStackChoice && imp.getNSlices() > 1 && chosenStackMethods [c].equals(STACK_NO_STACK)){
 			progress.notifyMessage("Task " + (task+1) + ": stack handling is set to '"
 				+ STACK_NO_STACK + "' but the image has " + imp.getNSlices()
-				+ " slices. The threshold will be taken from the first slice only.",
+				+ " slices. " + (ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c])
+					? "The FRACTION thresholds will be taken from the whole stack."
+					: "The threshold will be taken from the first slice only."),
 				ProgressReporter.NOTIFICATION);
 		}else if(imp.getNSlices() > 1 && chosenStackMethods [c].equals(STACK_PER_SLICE)
 				&& (chosenAlgorithms [c].equals("HYSTERESIS threshold")
@@ -2787,6 +2825,17 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 				+ " stack handling '" + chosenStackMethods [c] + "' has no effect.",
 				ProgressReporter.NOTIFICATION);
 		}
+		
+		/*	"No stack" with time steps thresholded together takes the threshold from the first
+		 *	slice of the first time step and applies it to every time step. */
+		if(usesStackChoice && imp.getNFrames() > 1 && !separateTimesteps [c] && chosenStackMethods [c].equals(STACK_NO_STACK)
+				&& !ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c])){
+			progress.notifyMessage("Task " + (task+1) + ": stack handling is '" + STACK_NO_STACK + "' and the time steps are"
+				+ " thresholded together, so the threshold is taken from the first slice of the first time step and applied to"
+				+ " every time step. '" + STACK_POOLED + "' and the maximum-intensity projection pool all time steps.",
+				ProgressReporter.NOTIFICATION);
+		}
+		
 		if(separateTimesteps [c] && imp.getNFrames() == 1){
 			progress.notifyMessage("Task " + (task+1) + ": 'threshold every time step"
 				+ " independently' is on but the image has a single frame.",
@@ -2909,13 +2958,13 @@ private boolean readSettingsFromMacroString(String options){
 	chosenOutputName = macroChoice(options, "output", outputVariant, outputVariant[0]);
 	ChosenNumberFormat = macroChoice(options, "number-format", nrFormats, nrFormats[0]);
 	if(ChosenNumberFormat.equals(nrFormats[0])){
-		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
-		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
+		df6.setDecimalFormatSymbols(reportSymbols(Locale.US));
+		df3.setDecimalFormatSymbols(reportSymbols(Locale.US));
+		df0.setDecimalFormatSymbols(reportSymbols(Locale.US));
 	}else{
-		df6.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-		df3.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
-		df0.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.GERMANY));
+		df6.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
+		df3.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
+		df0.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
 	}
 
 	// Route A: a metadata file supplies every per-channel setting.
@@ -3330,8 +3379,100 @@ private void addFooter(TextCollector tp, Date currentDate) {
 }
 
 /**
- * @param channel: 1 <= channel <= # channels
- * */
+ * New in V0.2.1
+ * 
+ * The marks at the start of the slice labels of a segmented channel in the saved image, followed by the
+ * original slice label, e.g. "segm labels Channel 2 S3/42 T1/1". Users or the software CiliaQ can then
+ * read them:
+ * 	- "segm " says that the channel is segmented (CiliaQ v0.2.2, start-up check 1);
+ * 	- "segm labels " says that the channel holds object labels (ridge detection, expansion from seeds).
+ * Since both start with "segm ", a CiliaQ version that knows only the first mark still recognises a label channel as
+ * segmented. Since the marks travel with the image, CiliaQ knows which channels to analyse, and how, even when a
+ * _CQP.tif is opened without its report, e.g. after it was renamed, moved to another folder or sent to a colleague.
+ */
+static final String SEGM_MARK = "segm ", SEGM_LABELS_MARK = "segm labels ";
+
+/**
+ * New in V0.2.1
+ * 
+ * The mark for one channel of the output image:
+ * 	- SEGM_LABELS_MARK if the channel was segmented into object labels (ridge detection, expansion from seeds);
+ * 	- SEGM_MARK if it was segmented by any other method;
+ * 	- null if it was not segmented, so its slice labels stay as they are.
+ * Since the mark follows from the method chosen for the channel, a raw channel is never marked, and a label channel is
+ * never offered to CiliaQ as a binary mask. A channel of touching cilia segmented by expansion from seeds, for example,
+ * can then be analysed object by object in CiliaQ rather than as one merged object.
+ *
+ * @param channel	the channel of the output image, 1-based, counted before any channel copies are added
+ * @return the mark, or null if the channel is not segmented
+ */
+private String segmentationMark(int channel){
+	String mark = null;
+	for(int i = 0; i < channelIDs.length; i++){
+		if(channelIDs [i] != channel)	continue;
+		// A label method wins over any other method chosen for the same channel: a label image read as a plain mask would merge its objects
+		if(RIDGE_DETECTION.equals(chosenAlgorithms [i]) || EXPANSION_SEEDS.equals(chosenAlgorithms [i]))	return SEGM_LABELS_MARK;
+		mark = SEGM_MARK;
+	}
+	return mark;
+}
+
+/**
+ * Marks the segmented channels of an output image that holds only the input image's channels (no
+ * channel copies added). Every plane of such a channel, in all slices and all frames, gets a slice label made of:
+ * 	- the mark of its channel (segmentationMark), and
+ * 	- the input image's slice label for that plane, or "Channel c Ss/n Tt/n" if the input has none.
+ * Since the output with channel copies is labelled the same way, every saved image tells its segmented channels apart
+ * from its raw ones, whichever output option was chosen. When you scroll through a saved _CQP.tif in Fiji, for example,
+ * the label above the image shows whether the channel on screen is a segmentation or the original intensities.
+ * In v0.2.0, an image saved without copies carried no mark.
+ *
+ * New in V0.2.1
+ * 
+ * @param outImp	the output image; its slice labels are set
+ * @param imp	the input image, with the same channels, slices and frames as outImp, from which the slice labels are taken
+ */
+private void markSegmentedChannels(ImagePlus outImp, ImagePlus imp){
+	for(int c = 0; c < outImp.getNChannels(); c++){
+		String mark = segmentationMark(c+1);
+		if(mark == null)	continue;
+		for(int s = 0; s < outImp.getNSlices(); s++){
+			for(int f = 0; f < outImp.getNFrames(); f++){
+				String label = null;
+				try{
+					label = imp.getStack().getSliceLabel(imp.getStackIndex(c+1, s+1, f+1));
+				}catch(Exception e){
+					// <what fails here, e.g. a virtual stack whose label cannot be read>: use the generic label below
+					label = null;
+				}
+				if(label == null || label.isEmpty()){
+					label = "Channel " + (c+1) + " S" + (s+1) + "/" + outImp.getNSlices()
+						+  " T" + (f+1) + "/" + outImp.getNFrames();
+				}
+				outImp.getStack().setSliceLabel(mark + label, outImp.getStackIndex(c+1, s+1, f+1));
+			}
+		}
+	}
+}
+
+/**
+ * A copy of one channel of an image, with all its slices and frames, as a single-channel image of the same bit depth.
+ * Since the segmentation methods, their statistics and their preprocessing work on one channel at a time, they get
+ * such a copy. Preprocessing can therefore change the copy without changing the user's image. A Subtract Background
+ * or a median filter applied before thresholding, for example, never reaches the image that is saved as the raw channel.
+ *
+ * The copy keeps:
+ * 	- the calibration (a copy of it), so methods that use the voxel size, such as spot detection and the z methods of
+ * 	  ridge detection, measure the copy as they would the original;
+ * 	- the overlay (a duplicate), only if copyOverlay is set.
+ *
+ * @param imp	the image to copy from
+ * @param channel	the channel to copy, 1-based (1 <= channel <= the number of channels of imp)
+ * @param adjustDisplayRangeTo12bit	if true, the display range is set to 0-4095, the range of 12-bit camera data stored
+ * 									in a 16-bit image, so such a copy looks right when shown
+ * @param copyOverlay	if true and imp has an overlay, the copy gets a duplicate of it
+ * @return the new single-channel image
+ */
 private ImagePlus copyChannel(ImagePlus imp, int channel, boolean adjustDisplayRangeTo12bit, boolean copyOverlay){
 	ImagePlus impNew = IJ.createHyperStack("channel image", imp.getWidth(), imp.getHeight(), 1, imp.getNSlices(), imp.getNFrames(), imp.getBitDepth());
 	int index = 0, indexNew = 0;
@@ -3382,7 +3523,10 @@ private ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result [][] getFrac
 			out [i] = new ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result [nSl];
 			for(int sl = 0; sl < nSl; sl++){
 				if(keepAwake)	stayAwake();
-				ImagePlus oneSlice = getSingleSlice(selectedImp, sl + 1);
+				
+				// With pooled time steps, slice s of every frame together
+				ImagePlus oneSlice = !separateTimeSteps && imp.getNFrames() > 1 ? getSliceOfEveryFrame(selectedImp, sl + 1)
+						: getSingleSlice(selectedImp, sl + 1);
 				out [i][sl] = ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.compute(
 						oneSlice, st, localMethod);
 				oneSlice.changes = false;
@@ -3408,6 +3552,20 @@ private ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result [][] getFrac
 	return out;
 }
 
+/**	@return one slice across every frame of a single-channel image,
+ *	as a stack of copies of those planes, for
+ *	per-slice statistics with pooled time steps.
+ **/
+private ImagePlus getSliceOfEveryFrame(ImagePlus imp, int slice){
+	ImageStack st = new ImageStack(imp.getWidth(), imp.getHeight());
+	for(int t = 1; t <= imp.getNFrames(); t++){
+		st.addSlice(imp.getStack().getProcessor(imp.getStackIndex(1, slice, t)).duplicate());
+	}
+	ImagePlus out = new ImagePlus(imp.getTitle() + "_s" + slice + "_all_frames", st);
+	out.setCalibration(imp.getCalibration());
+	return out;
+}
+
 /**	@return a one-slice ImagePlus copy of the given slice, for per-slice statistics. */
 private ImagePlus getSingleSlice(ImagePlus imp, int slice){
 	ImageStack st = new ImageStack(imp.getWidth(), imp.getHeight());
@@ -3426,7 +3584,7 @@ private ImagePlus getSingleSlice(ImagePlus imp, int slice){
 private void segmentImageWithSurface(ImagePlus imp,
 		ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result r, int z, ImagePlus impTemp,
 		int zTemp){
-	segmentImageWithSurface(imp, r.surface, r.width, r.global, z, impTemp, zTemp);
+	segmentImageWithSurface(imp, r.surface, r.width, r.global, z, impTemp, zTemp, false);	// FRACTION: at or above the surface
 }
 
 /**
@@ -3435,15 +3593,17 @@ private void segmentImageWithSurface(ImagePlus imp,
  *	Takes the raw surface rather than either method's result type, so a second surface method needs no
  *	second apply path. A null surface falls back to the scalar, which is what the global FRACTION method
  *	uses.
+ *	@param strict: keep only voxels ABOVE the surface (PHANSALKAR, as Phansalkar's method and Fiji's Auto
+ *	Local Threshold); otherwise voxels at or above it are kept (FRACTION).
  */
 private void segmentImageWithSurface(ImagePlus imp, float [] surface, int surfaceWidth,
-		double scalarThreshold, int z, ImagePlus impTemp, int zTemp){
+		double scalarThreshold, int z, ImagePlus impTemp, int zTemp, boolean strict){
 	double maxValue = Math.pow(2.0, imp.getBitDepth()) - 1;
 	for(int x = 0; x < imp.getWidth(); x++){
 		for(int y = 0; y < imp.getHeight(); y++){
 			double threshold = surface == null ? scalarThreshold : surface [y * surfaceWidth + x];
 			double pxintensity = impTemp.getStack().getVoxel(x,y,zTemp);
-			if(pxintensity < threshold){
+			if(pxintensity < threshold || (strict && pxintensity == threshold)){
 				imp.getStack().setVoxel( x, y, z, 0.0);
 			}else{
 				countSegmentedVoxel(imp, x, y, z);		// zero-intensity loss warning
@@ -3487,16 +3647,26 @@ private double [][] getThresholdsPerSlice (ImagePlus imp, String chosenMethod, S
 		int from = seperateTimeSteps ? startGroup + g : startGroup;
 		int to = seperateTimeSteps ? startGroup + g : endGroup;
 		ImagePlus selectedImp = getSelectedTimepoints(imp, from, to, false);
+		
 		/*
-		 * One threshold per SLICE. When time steps are pooled, every frame's slice s shares the
-		 * threshold taken here from the first frame of the group - the same convention as the pooled
-		 * whole-stack modes.
+		 * One threshold per SLICE.
+		 * 
+		 * When time steps are pooled, slice s's threshold comes from slice s of every frame together
+		 * (one histogram of those planes).
 		 */
 		int nSl = imp.getNSlices();
+		boolean acrossFrames = !seperateTimeSteps && imp.getNFrames() > 1;
 		out [g] = new double [nSl];
 		for(int sl = 0; sl < nSl; sl++){
 			if(keepAwake)	stayAwake();
-			out [g][sl] = getSingleSliceImageThreshold(selectedImp, sl + 1, chosenAlg);
+			if(acrossFrames){
+				ImagePlus planes = getSliceOfEveryFrame(selectedImp, sl + 1);
+				out [g][sl] = getHistogramThreshold(planes, chosenAlg);
+				planes.changes = false;
+				planes.close();
+			}else{
+				out [g][sl] = getSingleSliceImageThreshold(selectedImp, sl + 1, chosenAlg);
+			}
 		}
 		selectedImp.changes = false;
 		selectedImp.close();
@@ -3727,21 +3897,23 @@ private static boolean isFlat(ImagePlus imp, int frame, int slice) {
  * per slice. Each such part is reported; the caller then segments nothing
  * there. Only parts whose threshold is taken from and applied to exactly that
  * data are checked: one threshold for the whole channel is covered by the check
- * before segmentation, and with per-slice thresholds pooled over several time
- * steps a slice threshold applies to all of them, so none is emptied.
+ * before segmentation. With per-slice thresholds pooled over several time steps,
+ * slice s is checked across all of them, as its threshold comes from all of them.
  */
 private boolean[][] flatParts(ImagePlus imp, int nGroups, int nPerGroup, int channelID, int task,
 		ProgressReporter progress) {
 	boolean[][] flat = new boolean[nGroups][nPerGroup];
-	if (nGroups == 1 && (nPerGroup == 1 || imp.getNFrames() > 1))
+	if (nGroups == 1 && nPerGroup == 1)
 		return flat;
+	// Per slice pooled over several time steps, slice s is checked across all of them
+	boolean acrossFrames = nGroups == 1 && imp.getNFrames() > 1;
 	for (int g = 0; g < nGroups; g++) {
 		for (int s = 0; s < nPerGroup; s++) {
-			flat[g][s] = isFlat(imp, g + 1, nPerGroup == 1 ? 0 : s + 1);
+			flat[g][s] = isFlat(imp, acrossFrames ? 0 : g + 1, nPerGroup == 1 ? 0 : s + 1);
 			if (flat[g][s]) {
 				progress.notifyMessage("Task " + (task + 1) + "/" + tasks + ", channel " + channelID + ": "
 						+ (nPerGroup == 1 ? "time step " + (g + 1)
-								: "slice " + (s + 1) + (nGroups > 1 ? " of time step " + (g + 1) : ""))
+								: "slice " + (s + 1) + (nGroups > 1 ? " of time step " + (g + 1) : acrossFrames ? " (in every time step)" : ""))
 						+ " has the same value in every voxel after preprocessing (no signal) - nothing was segmented there.",
 						ProgressReporter.NOTIFICATION);
 			}
@@ -3796,6 +3968,11 @@ private void segmentUsingSpotDetection(ImagePlus channelImp, ProgressReporter pr
 	
 	String spotReject = ss.rejectionReason();
 	if(spotReject != null) throw new SettingsRejectedException(spotReject);
+	String vNote = ciliaQ_Prep_jnh.spot_detection.SpotDetector.voxelSizeNote(channelImp);
+	if(vNote != null){
+		progress.notifyMessage("Channel " + channelWriteImp + ": " + vNote, ProgressReporter.NOTIFICATION);
+		tp1.append("	NOTE	" + vNote);
+	}
 	
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1.0;
 	int totalSpots = 0, totalRejected = 0;
@@ -3829,7 +4006,63 @@ private void segmentUsingSpotDetection(ImagePlus channelImp, ProgressReporter pr
 }
 
 /**
+ * The ridge seeds' sigma and thresholds for part of a channel (the whole stack, or one time step),
+ * derived from its signal range as for ridge detection. Since part is always the channel itself, never the inverted
+ * copy, the values for dark lines come from its dark side (median - p0.1), so ridge detection and the ridge seeds
+ * report the same statistics for the same channel.
+ *
+ * New in V0.2.1
+ * 
+ * Values that cannot work are refused with a SettingsRejectedException:
+ * 	- values that fail RidgeSettings.rejectionReason, with the MAD of part as the noise level;
+ * 	- an upper threshold of about 0 (see the check in the code).
+ * The caller decides what a refusal means: for the whole stack it refuses the channel, for one time step it leaves
+ * that time step empty and the others are segmented.
+ *
+ * The derived values are written into rs and reported in one line: median, percentiles, MAD, the signal range and its
+ * tiles, sigma and both thresholds. Since the line names the part it was derived for, e.g. "frame 3" or "all 50
+ * frames", the user can see which values each time step got, e.g. why a dim or bleached time step found fewer seeds.
+ * 
+ *
+ * @param rs	the seeds' ridge settings, a fresh copy from ExpansionSettings.toRidgeSettings(); the derived values
+ * 				are written into it
+ * @param part	the channel, or one time step of it
+ * @param writeImp	the output image, whose raw channel decides which tiles are kept (tiles without a positive voxel
+ * 					are left out)
+ * @param channelWriteImp	the channel of writeImp that holds the raw channel
+ * @param firstFrame	the time step of writeImp at which part starts (1-based)
+ * @param what	the part as named in the report, e.g. "frame 1" or "all 50 frames"
+ * @throws SettingsRejectedException	if the derived values cannot work, with the reason in the message
+ */
+private void deriveSeedRidge(ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs, ImagePlus part, ImagePlus writeImp,
+		int channelWriteImp, int firstFrame, String what, TextCollector tp1) throws SettingsRejectedException {
+	double [] st = CiliaQPrepStatistics.medianPercentilesMad(part);
+	SignalRange sr = new SignalRange(part, writeImp, channelWriteImp, firstFrame, rs.darkLine);
+	rs.deriveFromRange(sr.range);
+	String reject = rs.rejectionReason(st [2]);
+	if(reject != null) throw new SettingsRejectedException("Expansion seed detection: " + reject);
+
+	// Near-zero upper threshold: the detector would trace noise and might not finish.
+	// The MAD check above misses this on background-free data (MAD = 0), so we catch it before detection.
+	if(rs.upperThreshold <= 1e-6){
+		throw new SettingsRejectedException("Expansion seed detection: the derived upper threshold is ~0 ("
+			+ String.format(java.util.Locale.US, "%.3g", rs.upperThreshold) + ", signal range " + df3.format(sr.range) + "),"
+			+ " so seed detection was not run: the detector would trace noise and might not finish."
+			+ " Raise 'contrast sensitivity', or check whether the channel carries filamentous signal.");
+	}
+
+	tp1.append("	Ridge seeds, derived for " + what + "	median " + df3.format(st [0])
+		+ ", p99.9 " + df3.format(st [1]) + ", p0.1 " + df3.format(st [3]) + ", MAD " + df3.format(st [2])
+		+ ", signal range (median of tiles) " + df3.format(sr.range) + " [" + sr.tileList(df3) + "]"
+		+ ", sigma " + df3.format(rs.sigma) + ", upper " + df6.format(rs.upperThreshold)
+		+ ", lower " + df6.format(rs.lowerThreshold)
+		+ (rs.advancedOverride ? " (set by user)" : " (derived)"));
+}
+
+/** 
  * EXPANSION FROM SEEDS producing a LABEL image.
+ * 
+ * New in V0.2.1
  * 
  * This expansion tool can work for both LoG seeds or any other high threshold seed (hysteresis kind of seeding)".
  * So there is ONE growth engine and the seed source is a user choice - ridge lines for filaments,
@@ -3861,6 +4094,60 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 	}
 
 	/*
+	 * For ridge seeds of dark lines, the object extent and the seeds are found in
+	 * an inverted copy of the channel, so dark objects are expanded from dark
+	 * lines. The seeds' values are derived from the channel itself, from the dark
+	 * side, as for ridge detection (expandFromSeeds).
+	 */
+	boolean seedDark = es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE)
+			&& es.toRidgeSettings().darkLine;
+	ImagePlus extentImp = channelImp;
+	if (seedDark) {
+		extentImp = invertedCopy(channelImp);
+		tp1.append(
+				"	NOTE	ridge seeds of dark lines: the object extent and the seeds come from an inverted copy of the channel"
+						+ " (stack maximum - value); the seeds' values are derived from the channel's dark side, as for ridge detection");
+	}
+	/*
+	 * The expansion itself is in expandFromSeeds, so the inverted
+	 * copy is closed however it ends (a refused channel included).
+	 */
+	try {
+		return expandFromSeeds(extentImp, channelImp, seedDark, progress, es, writeImp, channelWriteImp, channelIndex,
+				channelArrayIndex, tp1);
+	} finally {
+		if (extentImp != channelImp) {
+			extentImp.changes = false;
+			extentImp.close();
+		}
+	}
+}
+
+/**
+ * The expansion from seeds for one channel, called by segmentUsingExpansion (see there for the method).
+ * It is a method of its own because segmentUsingExpansion makes an inverted copy of the channel for dark-line ridge
+ * seeds and must close it however the expansion ends. Since this method runs inside a try there, a finally there
+ * closes the copy, also when the channel is refused.
+ * 
+ * New in V0.2.1
+ *
+ * The object extent and the seeds are found in channelImp, while the ridge seeds' values come from origImp. For dark
+ * lines this means:
+ * 	- the extent and the seeds see bright objects, on the inverted copy;
+ * 	- sigma and thresholds are derived from the channel's dark side, as for ridge detection, so both report the same
+ * 	  statistics for the same channel.
+ * In a batch with dark-line seeds, a refused channel therefore leaves no extra copy of the channel in memory.
+ *
+ * @param channelImp	the image the object extent and the seeds are found in (dark-line ridge seeds: the inverted copy)
+ * @param origImp	the channel itself, from which the ridge seeds' values are derived (other seed sources: the same
+ * 					image as channelImp)
+ * @param seedDark	ridge seeds of dark lines
+ * @return writeImp; the labels are kept as pending and written after all channels are segmented
+ */
+private ImagePlus expandFromSeeds(ImagePlus channelImp, ImagePlus origImp, boolean seedDark, ProgressReporter progress,
+		ciliaQ_Prep_jnh.expansion.ExpansionSettings es, ImagePlus writeImp, int channelWriteImp,
+		int channelIndex, int channelArrayIndex, TextCollector tp1) throws Exception {
+	/*
 	 * The two thresholds go through getThresholds, so they honour the SAME stack-processing choice
 	 * (whole stack histogram / maximum projection / per slice) and the same separate-time-steps choice
 	 * as every other method. Custom values bypass it, exactly as CUSTOM threshold does.
@@ -3869,7 +4156,15 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 	double [] lowThr;
 	if(es.customValueForLowThreshold()){
 		lowThr = new double [nFrames];
-		Arrays.fill(lowThr, es.customLowThr);
+		/*	Dark-line ridge seeds: the extent is found in the inverted copy (stack maximum - value), but a threshold typed by
+		 *	hand is a raw intensity, as the user reads it off the channel in Fiji. Since the copy keeps the voxels above its
+		 *	threshold (SeededGrowth.mask: >), the typed value is inverted the same way. The copy then keeps the voxels above
+		 *	maximum - typed value, which are the channel's voxels below the typed value:
+		 *		- dark-line seeds keep the voxels below the typed value;
+		 *		- bright seeds keep the voxels above it;
+		 *		- the typed value itself is left out in both.
+		 */
+		Arrays.fill(lowThr, seedDark ? stackMaximum(origImp) - es.customLowThr : es.customLowThr);
 	}else{
 		lowThr = getThresholds(channelImp,
 				stackMethodForStackWideMethod(chosenStackMethods [channelArrayIndex]),
@@ -3887,6 +4182,47 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 		}
 	}
 
+	/*	The ridge seeds' sigma and thresholds come from the whole stack, as for ridge detection, unless "Threshold every
+	 *	time step independently" is on. In that case each time step gets its own values, as the extent's thresholds do.
+	 *	Since one set of values serves every time step, a dim or empty time step cannot refuse the image on its own.
+	 *	The values always come from the channel itself (origImp), for dark lines from its dark side. Since ridge detection
+	 *	derives them the same way, both report the same statistics for the same channel.
+	 *	This way, a time-lapse in which a cilium leaves the field for a few time steps, or whose last time steps are
+	 *	bleached, is still segmented with one consistent threshold.
+	 */
+	boolean seedRidge = es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE);
+	boolean seedPerFrame = separateTimesteps [channelArrayIndex] && nFrames > 1;
+	ciliaQ_Prep_jnh.ridge_detection.RidgeSettings seedRs = null;
+	if(seedRidge){
+		/*	Written once per channel, before the time steps:
+		 *		- the legend of the tile lists in the derived lines below;
+		 *		- the share of NaN voxels (e.g. 0/0 after Divide by Background), which the line detector reads as 0;
+		 *		- the z note, which depends on the settings and the stack, not on a time step.
+		 *	Since these lines come before any time step can be refused, they appear even if time step 1 is refused, and
+		 *	a time-lapse with 50 time steps gets them once, not 50 times.
+		 */
+		tp1.append("	Signal range tiles (legend)	" + SignalRange.TILE_LEGEND);
+		noteNaN(origImp, "Channel " + channelWriteImp + ": ridge seeds", progress, tp1);
+		String zNote = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.stackNote(origImp, es.toRidgeSettings());
+		if(zNote != null){
+			progress.notifyMessage("Expansion seeds: " + zNote, ProgressReporter.NOTIFICATION);
+			tp1.append("	NOTE	ridge seeds: " + zNote);
+		}
+		if(!seedPerFrame){
+			seedRs = es.toRidgeSettings();
+			deriveSeedRidge(seedRs, origImp, writeImp, channelWriteImp, 1, nFrames == 1 ? "frame 1" : "all " + nFrames + " frames", tp1);
+		}
+	}
+	if(es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_SPOT)){
+		/*	Spot seeds blur z by the voxel size. Since a stack calibrated in pixels has none, it is blurred as if its voxels
+		 *	were cubic, so the note says so, once per channel, as for spot detection. */
+		String vNote = ciliaQ_Prep_jnh.spot_detection.SpotDetector.voxelSizeNote(channelImp);
+		if(vNote != null){
+			progress.notifyMessage("Channel " + channelWriteImp + ": spot seeds: " + vNote, ProgressReporter.NOTIFICATION);
+			tp1.append("	NOTE	spot seeds: " + vNote);
+		}
+	}
+
 	int [][] labelsPerFrame = new int [nFrames][];
 	int maxLabels = 0;
 	for(int t = 0; t < nFrames; t++){
@@ -3901,37 +4237,42 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 		boolean [] mask = sg.mask(selectedImp, low);
 
 		int [] seeds;
-		if(es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE)){
-			ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = es.toRidgeSettings();
-			double [] st = medianAndHighPercentile(selectedImp);
-			SignalRange sr = new SignalRange(selectedImp, writeImp, channelWriteImp, t+1, rs.darkLine);
-			rs.deriveFromRange(sr.range);
-			String reject = rs.rejectionReason(st [2]);
-			if(reject != null) throw new SettingsRejectedException("Expansion seed detection: " + reject);
-			
-			if(rs.upperThreshold <= 1e-6){
-				throw new SettingsRejectedException("Expansion seed detection: the upper threshold is ~0 ("
-					+ String.format(java.util.Locale.US, "%.3g", rs.upperThreshold) + ", signal range " + df3.format(sr.range) + ")."
-					+ " On background-free data the line detector may trace noise and may not finish."
-					+ " If so, raise 'contrast sensitivity', or check whether the channel carries filamentous signal.");
-			}
-			
-			tp1.append("	Ridge seeds, derived for frame " + (t+1) + "	median " + df3.format(st [0])
-				+ ", p99.9 " + df3.format(st [1]) + ", p0.1 " + df3.format(st [3]) + ", MAD " + df3.format(st [2])
-				+ ", signal range (median of tiles) " + df3.format(sr.range) + " [" + sr.tileList(df3)
-				+ " - g = grid, s = shifted grid, (...) = left out]"
-				+ ", sigma " + df3.format(rs.sigma) + ", upper " + df6.format(rs.upperThreshold)
-				+ ", lower " + df6.format(rs.lowerThreshold)
-				+ (rs.advancedOverride ? " (set by user)" : " (derived)"));
-			
-			if(t == 0){	// once per channel: detect() runs per frame, so a note there repeated per frame
-				String zNote = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.stackNote(selectedImp, rs);
-				if(zNote != null){
-					progress.notifyMessage("Expansion seeds: " + zNote, ProgressReporter.NOTIFICATION);
-					tp1.append("	NOTE	ridge seeds: " + zNote);
+		if(seedRidge){
+			ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = seedRs;
+			if(seedPerFrame){
+				rs = es.toRidgeSettings();
+				// Dark lines: the values come from this time step of the channel itself, not from the inverted copy searched below
+				ImagePlus origFrame = seedDark ? getSelectedTimepoints(origImp, t+1, t+1, false) : selectedImp;
+				try{
+					deriveSeedRidge(rs, origFrame, writeImp, channelWriteImp, t+1, "frame " + (t+1), tp1);
+				}catch(SettingsRejectedException e){
+					/*	A time step whose values are refused stays empty; the other time steps are segmented and the image is
+					 *	saved, as for a plane on which detection failed. Since the ERROR and the report line name the time
+					 *	step and the reason, the user sees which time step is missing, e.g. one in which the cilia left the
+					 *	field, without losing the rest of the time-lapse.
+					 */
+					progress.notifyMessage("Channel " + channelWriteImp + ", time step " + (t+1) + ": " + e.getMessage()
+							+ " - this time step was not segmented (left empty); the other time steps were.", ProgressReporter.ERROR);
+					tp1.append("	Frame " + (t+1) + "	NOT SEGMENTED: " + e.getMessage());
+					labelsPerFrame [t] = new int [W * H * D];
+					selectedImp.changes = false;
+					selectedImp.close();
+					continue;
+				}finally{
+					if(origFrame != selectedImp){
+						// the extra frame for dark lines, needed only for the values
+						origFrame.changes = false;
+						origFrame.close();
+					}
 				}
 			}
-			
+			if(seedDark){
+				// the inverted copy holds bright lines, so detect them as bright; 
+				// values above come from the channel's dark side
+				rs = rs.copy();
+				rs.darkLine = false;
+			}
+
 			ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.Result rr =
 					ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rs, progress);
 			if(rr.failedPlanes > 0){
@@ -3984,30 +4325,76 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 }
 
 /**
- * Median, 99.9th and 0.1th percentile, and MAD of a whole stack: for the report, and the MAD for the noise check in
- * RidgeSettings.rejectionReason (the thresholds come from CiliaQPrepStatistics.SignalRange). Used by ridge detection
- * and the ridge seeds alike, so both report and check the same statistics - two copies would drift apart.
- *
- * @return { median, p99.9, MAD, p0.1 }
+ * Derive the detector values of rs from a signal range and refuse values that cannot work.
+ * Shared by the whole stack and the time steps of ridge detection.
  */
-private double [] medianAndHighPercentile(ImagePlus channelImp){
-	int nVox = channelImp.getWidth() * channelImp.getHeight() * channelImp.getStackSize();
-	float [] all = new float [nVox];
-	int k = 0;
-	for(int s = 0; s < channelImp.getStackSize(); s++){
-		ij.process.ImageProcessor ip = channelImp.getStack().getProcessor(s+1);
-		for(int i = 0; i < channelImp.getWidth() * channelImp.getHeight(); i++) all [k++] = ip.getf(i);
+private void deriveRidgeOrRefuse(ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs, SignalRange sr, double median,
+		double mad) throws SettingsRejectedException {
+	rs.deriveFromRange(sr.range);
+	String reject = rs.rejectionReason(mad);
+	if(reject != null) throw new SettingsRejectedException(reject);
+	
+	// Additional check: near-zero upper threshold means the detector will trace noise and can hang. The
+	// MAD guard abovemisses this on background-free data (MAD = 0), so we catch it here, before detection.
+	if(rs.upperThreshold <= 1e-6){
+		throw new SettingsRejectedException("ridge detection: the derived upper threshold is ~0 for this channel "
+				+ "(median " + df3.format(median) + ", MAD " + df3.format(mad) + ", signal range " + df3.format(sr.range) + "), "
+				+ "so ridge detection was not run: the detector would trace noise and might not finish. "
+				+ "Raise 'contrast sensitivity', or check whether the channel carries filamentous signal.");
 	}
-	java.util.Arrays.sort(all);
-	double median = all [nVox/2];
-	double p001 = all [(int)(nVox * 0.001)]; // dark lines
-	double p999 = all [(int)(nVox * 0.999)];
-	double [] dev = new double [nVox];
-	for(int i = 0; i < nVox; i++) dev [i] = Math.abs(all [i] - median);
-	java.util.Arrays.sort(dev);
-	double mad = dev [nVox/2];
-	return new double [] { median, p999, mad, p001 };
 }
+
+/**
+ * New in V0.2.1: the largest value of an image (all planes; NaN left out), the maximum of invertedCopy.
+ */
+private static double stackMaximum(ImagePlus imp){
+	double max = -Double.MAX_VALUE;
+	for (int s = 1; s <= imp.getStackSize(); s++) {
+		ij.process.ImageProcessor p = imp.getStack().getProcessor(s);
+		for (int i = 0; i < p.getPixelCount(); i++)
+			if (p.getf(i) > max)
+				max = p.getf(i); // NaN is never > max
+	}
+	return max;
+}
+
+/**
+ * A copy of a single-channel image with its intensities inverted, so dark lines become bright lines:
+ * - Stack maximum - value for every voxel, zero areas included.
+ * - For dark lines the maximum is the counterpart of 0 for bright lines.
+ * - NaN stays NaN.
+ * - The stack maximum rather than the type maximum: the brightest voxel becomes 0
+ *   and the darkest maximum - minimum, so the inverted values keep the spread of the original
+ *   and fit its type.
+ *   
+ * New in V0.2.1
+ */
+private static ImagePlus invertedCopy(ImagePlus imp){
+	ImagePlus inv = imp.duplicate();
+	double max = stackMaximum(imp);
+	for(int s = 1; s <= inv.getStackSize(); s++){
+		ij.process.ImageProcessor p = inv.getStack().getProcessor(s);
+		for(int i = 0; i < p.getPixelCount(); i++){
+			float v = p.getf(i);
+			if(v == v)	p.setf(i, (float)(max - v));	// v == v: not NaN
+		}
+	}
+	return inv;
+}
+
+/**
+ * A note when a channel has NaN voxels (only 32-bit can, e.g. 0/0 after Divide by Background), once per
+ * channel: the statistics leave them out and the line detector reads them as 0 (RidgeSegmenter.withoutNonFinite).
+ */
+private void noteNaN(ImagePlus imp, String who, ProgressReporter progress, TextCollector tp1){
+	long nNaN = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.countNaN(imp);
+	if(nNaN == 0)	return;
+	String note = df3.format(100.0 * nNaN / ((double) imp.getWidth() * imp.getHeight() * imp.getStackSize()))
+			+ " % of the voxels are NaN (e.g. 0/0 after Divide by Background); the line detector reads them as 0";
+	progress.notifyMessage(who + ": " + note, ProgressReporter.NOTIFICATION);
+	tp1.append("	NOTE	" + note);
+}
+
 
 /**
  * RIDGE DETECTION (Steger line detector) producing a LABEL image.
@@ -4026,41 +4413,45 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 		ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs, ImagePlus writeImp, int channelWriteImp,
 		int channelIndex, TextCollector tp1) throws Exception {
 
-	/*
-	 * Stack-wide statistics, computed ONCE: the median, percentiles and MAD for the report and the noise check, and
-	 * the signal range below, whose tiles run through all planes. On example images, deriving them per slice made
-	 * line counts vary by two orders of magnitude between adjacent planes. Since adjacent planes hold nearly the same
-	 * structure, this variation is threshold inconsistency rather than structure, and it breaks z-linking.
-	 */
-	double [] st = medianAndHighPercentile(channelImp);
-	double median = st [0], p999 = st [1], mad = st [2], p001 = st [3];
-
-	/*	The range comes from tiles (median of the whole stack, a 3x3 grid and the shifted grid), not from the
-	 *	whole stack alone, so one bright artefact or a cilium that fills a small image cannot move it. See SignalRange. */
-	SignalRange sr = new SignalRange(channelImp, writeImp, channelWriteImp, 1, rs.darkLine);
-	rs.deriveFromRange(sr.range);
-	String reject = rs.rejectionReason(mad);
-
-	if(reject != null) throw new SettingsRejectedException(reject);
+	/*	Derive into a copy, so this image never changes the stored settings. */
+	rs = rs.copy();
 	
-	// Additional check: near-zero upper threshold means the detector will trace noise and can hang. The
-	// MAD guard above misses this on background-free data (MAD = 0), so catch it here, before detection.
-	if(rs.upperThreshold <= 1e-6){
-		throw new SettingsRejectedException("ridge detection: the derived upper threshold is ~0 for this channel "
-				+ "(median " + df3.format(median) + ", MAD " + df3.format(mad) + ", signal range " + df3.format(sr.range) + "), "
-				+ "so ridge detection was not run: the detector would trace noise and might not finish. "
-				+ "Raise 'contrast sensitivity', or check whether the channel carries filamentous signal.");
-	}
-	
+	/*	The channel's header and the NaN note come first, before the values are derived. Since a refusal stops the
+	 *	channel at the derivation, the note must already be written by then: a channel of mostly NaN voxels, e.g. after
+	 *	Divide by Background on an empty background, then shows its share of NaN under its own header, which explains
+	 *	the refusal. The ridge seeds write the note at the same point. */
 	tp1.append("Ridge detection for channel " + channelWriteImp);
-	tp1.append("	Channel median	" + df3.format(median));
-	tp1.append("	Channel p0.1	" + df3.format(p001));
-	tp1.append("	Channel p99.9	" + df3.format(p999));
-	tp1.append("	Channel MAD	" + df3.format(mad));
-	tp1.append("	Signal range (median of tiles)	" + df3.format(sr.range));
-	tp1.append("	Signal range tiles (legend)	whole = whole stack; g1-g9 = 3x3 grid, row by row; s1-s9 = the same grid"
-			+ " shifted by half a tile; (...) = left out (no positive voxel in the raw channel)");
-	tp1.append("	Signal range per tile	" + sr.tileList(df3));
+	noteNaN(channelImp, "Channel " + channelWriteImp, progress, tp1);
+	
+	/*	With "Threshold every time step independently", every time step gets statistics and thresholds of its own, in the
+	 *	loop below; otherwise one set serves the whole stack. */
+	boolean perFrame = separateTimesteps [channelIndex] && channelImp.getNFrames() > 1;
+	SignalRange sr = null;
+	if(!perFrame){
+		/*
+		 * Stack-wide statistics, computed ONCE: the median, percentiles and MAD for the report and the noise check, and
+		 * the signal range below, whose tiles run through all planes. On example images, deriving them per slice made
+		 * line counts vary by two orders of magnitude between adjacent planes. Since adjacent planes hold nearly the same
+		 * structure, this variation is threshold inconsistency rather than structure, and it breaks z-linking.
+		 */
+		double [] st = CiliaQPrepStatistics.medianPercentilesMad(channelImp);
+		double median = st [0], p999 = st [1], mad = st [2], p001 = st [3];
+
+		/*	The range comes from tiles (median of the whole stack, a 3x3 grid and the shifted grid), not from the
+		 *	whole stack alone, so one bright artefact or a cilium that fills a small image cannot move it. See SignalRange. */
+		sr = new SignalRange(channelImp, writeImp, channelWriteImp, 1, rs.darkLine);
+		deriveRidgeOrRefuse(rs, sr, median, mad);
+
+		tp1.append("	Channel median	" + df3.format(median));
+		tp1.append("	Channel p0.1	" + df3.format(p001));
+		tp1.append("	Channel p99.9	" + df3.format(p999));
+		tp1.append("	Channel MAD	" + df3.format(mad));
+		tp1.append("	Signal range (median of tiles)	" + df3.format(sr.range));
+	}else{
+		tp1.append("	Statistics and thresholds	per time step (Threshold every time step independently), see the lines per frame below");
+	}
+	tp1.append("	Signal range tiles (legend)	" + SignalRange.TILE_LEGEND);
+	if(!perFrame)	tp1.append("	Signal range per tile	" + sr.tileList(df3));
 	tp1.append(rs.report().replaceAll("\n$", ""));
 
 	if(keepIntensities){
@@ -4084,17 +4475,61 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 			new ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.Result [channelImp.getNFrames()];
 	int maxObjects = 0;
 	boolean anyWrapped = false;
-	int failedPlanes = 0;	// planes on which the detector failed, over all frames
-	for(int t = 0; t < channelImp.getNFrames(); t++){
-		if(keepAwake) stayAwake();
-		progress.updateBarText("Ridge detection on channel " + channelWriteImp + ", frame " + (t+1) + " ...");
-		ImagePlus selectedImp = getSelectedTimepoints(channelImp, t+1, t+1, false);
-		res [t] = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rs, progress);
-		maxObjects = Math.max(maxObjects, res [t].nObjects);
-		anyWrapped = anyWrapped || res [t].wrapped;
-		failedPlanes += res [t].failedPlanes;
-		selectedImp.changes = false;
-		selectedImp.close();
+	
+	// planes on which the detector failed, over all frames
+	int failedPlanes = 0;
+		
+	/*	Dark lines are detected as bright lines on an inverted copy of the channel.
+	 *	On the inverted copy everything runs as for bright lines. The thresholds stay those
+	 *	derived on the channel itself from the dark side (median - p0.1), the same contrast.*/
+	ImagePlus detectImp = rs.darkLine ? invertedCopy(channelImp) : channelImp;
+	try{
+		for(int t = 0; t < channelImp.getNFrames(); t++){
+			if(keepAwake) stayAwake();
+			progress.updateBarText("Ridge detection on channel " + channelWriteImp + ", frame " + (t+1) + " ...");
+			ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rsT = rs;
+			if(perFrame){	// The statistics and thresholds of this time step alone
+				ImagePlus frameImp = getSelectedTimepoints(channelImp, t+1, t+1, false);
+				double [] stT = CiliaQPrepStatistics.medianPercentilesMad(frameImp);
+				SignalRange srT = new SignalRange(frameImp, writeImp, channelWriteImp, t+1, rs.darkLine);
+				frameImp.changes = false;
+				frameImp.close();
+				rsT = rs.copy();
+				try{
+					deriveRidgeOrRefuse(rsT, srT, stT [0], stT [2]);
+				}catch(SettingsRejectedException e){
+					/*	A time step whose values are refused stays empty, the other time steps
+					 *	are segmented and the image is saved, as for a failed plane. */
+					progress.notifyMessage("Channel " + channelWriteImp + ", time step " + (t+1) + ": " + e.getMessage()
+							+ " - this time step was not segmented (left empty); the other time steps were.", ProgressReporter.ERROR);
+					tp1.append("	Frame " + (t+1) + "	NOT SEGMENTED: " + e.getMessage());
+					res [t] = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.Result.empty(channelImp.getWidth(), channelImp.getHeight(),
+							channelImp.getNSlices());
+					continue;
+				}
+				tp1.append("	Frame " + (t+1) + "	median " + df3.format(stT [0]) + ", p99.9 " + df3.format(stT [1])
+						+ ", p0.1 " + df3.format(stT [3]) + ", MAD " + df3.format(stT [2])
+						+ ", signal range (median of tiles) " + df3.format(srT.range) + " [" + srT.tileList(df3) + "]"
+						+ ", sigma " + df3.format(rsT.sigma) + ", upper " + df6.format(rsT.upperThreshold)
+						+ ", lower " + df6.format(rsT.lowerThreshold) + (rsT.advancedOverride ? " (set by user)" : " (derived)"));
+			}
+			if(rsT.darkLine){	//The inverted copy holds bright lines
+				rsT = rsT.copy();
+				rsT.darkLine = false;
+			}
+			ImagePlus selectedImp = getSelectedTimepoints(detectImp, t+1, t+1, false);
+			res [t] = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rsT, progress);
+			maxObjects = Math.max(maxObjects, res [t].nObjects);
+			anyWrapped = anyWrapped || res [t].wrapped;
+			failedPlanes += res [t].failedPlanes;
+			selectedImp.changes = false;
+			selectedImp.close();
+		}
+	}finally{
+		if(detectImp != channelImp){
+			detectImp.changes = false;
+			detectImp.close();
+		}
 	}
 	tp1.append("	Detected filaments (max over frames)	" + maxObjects);
 	if(failedPlanes > 0){
@@ -4641,6 +5076,7 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 	}
 	tp.append("Preparation settings:	");
 	tp.append("	Segmentation style:	" + chosenImageStyle);
+	tp.append("	Number format:	" + ChosenNumberFormat);	// New in V0.2.1: read back by importSettings, so a settings file reproduces it
 	
 	for(int i = 0; i < channelIDs.length; i++){
 		tp.append("	Segmented channel " + (i+1));

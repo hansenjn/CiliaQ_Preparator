@@ -129,9 +129,12 @@ public class RidgeSettings implements Cloneable {
 	}
 
 	/**
-	 * Contrast -> threshold, matching how Fiji's Ridge Detection computes it. The 0.17 factor and the
-	 * floor() are both essential; the thresholds act on the SECOND-DERIVATIVE response, not on
-	 * intensity, so they cannot be derived as a simple fraction of the intensity range.
+	 * Contrast -> threshold, as Fiji's Ridge Detection computes it, without its rounding. The 0.17 factor is essential;
+	 * the thresholds act on the SECOND-DERIVATIVE response, not on intensity, so they cannot be derived as a simple
+	 * fraction of the intensity range.
+	 * New compared to Fiji's Ridge Detection: no floor(). Fiji's dialog rounds the raw value down to whole
+	 * units, as it takes 8-bit grey values; here that set every contrast below about 11.5 (width 6) to 0, so channels
+	 * with small ranges, such as Divide by Background (values around 1), were refused at every usual sensitivity.
 	 */
 	public static double thresholdForContrast(double lineWidth, double contrast) {
 		double s = sigmaForWidth(lineWidth);
@@ -139,7 +142,7 @@ public class RidgeSettings implements Cloneable {
 		double raw = Math.abs(-2.0 * contrast * halfWidth
 				/ (Math.sqrt(2.0 * Math.PI) * s * s * s)
 				* Math.exp(-(halfWidth * halfWidth) / (2.0 * s * s)));
-		return 0.17 * Math.floor(raw);
+		return 0.17 * raw;
 	}
 
 	/** Macro token of the z method (no spaces): classic, in-focus, 3D. */
@@ -259,6 +262,18 @@ public class RidgeSettings implements Cloneable {
 					+ " and a continuity between 0 and 1 (got " + IJ.d2s(turnAngle, 1) + ", " + IJ.d2s(turnTangent, 2) + ", " + IJ.d2s(turnContinuity, 2) + ")";
 		if (zProfileSmoothing < 0.0)
 			return "ridge detection: the z-profile smoothing must be 0 (automatic) or above (got " + IJ.d2s(zProfileSmoothing, 2) + ")";
+		
+		/*	Values the user set by hand are checked here, before the run. Derived values cannot be wrong in
+		 *	these ways; set by hand, a sigma of 0 or a lower threshold above the upper ran without a word, and an upper
+		 *	threshold of about 0 was refused only during processing (and called derived). */
+		if (advancedOverride && !(sigma > 0.0))
+			return "ridge detection: the sigma you set must be above 0 (got " + IJ.d2s(sigma, 4) + ")";
+		if (advancedOverride && !(upperThreshold > 1e-6))
+			return "ridge detection: the upper threshold you set is about 0 or below (got " + IJ.d2s(upperThreshold, 6)
+					+ ") - the detector would trace noise and might not finish";
+		if (advancedOverride && !(lowerThreshold >= 0.0 && lowerThreshold <= upperThreshold))
+			return "ridge detection: the lower threshold you set must lie between 0 and the upper threshold (got lower "
+					+ IJ.d2s(lowerThreshold, 4) + ", upper " + IJ.d2s(upperThreshold, 4) + ")";
 		return null;
 	}
 

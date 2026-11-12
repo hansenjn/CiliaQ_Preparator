@@ -93,24 +93,20 @@ public class SpotDetector {
 		return best;
 	}
 
-	/** p10 of the non-zero values of the channel - the "auto" minimum spot intensity. */
+	/** p10 of the non-zero values of the channel - the "auto" minimum spot intensity. Counted, not listed
+	 *  (CiliaQPrepStatistics.positiveQuantile), so a large stack does not need about 16 bytes per voxel for it. */
 	static double autoMinIntensity(ImagePlus imp) {
-		final int W = imp.getWidth(), H = imp.getHeight(), D = imp.getStackSize();
-		ArrayList<Float> nonZero = new ArrayList<Float>();
-		for (int z = 0; z < D; z++) {
-			ImageProcessor p = imp.getStack().getProcessor(z + 1);
-			for (int i = 0; i < W * H; i++) {
-				float v = p.getf(i);
-				if (v > 0f) nonZero.add(Float.valueOf(v));
-			}
-		}
-		if (nonZero.isEmpty()) return 0.0;
-		float[] intensityList = new float[nonZero.size()];
-		for (int i = 0; i < intensityList.length; i++) {
-			intensityList[i] = nonZero.get(i).floatValue();
-		}
-		Arrays.sort(intensityList);
-		return intensityList[(int) (intensityList.length * 0.10)];
+		return ciliaQ_Prep_jnh.CiliaQPrepStatistics.positiveQuantile(imp, 0.10);
+	}
+
+	/** A note for a stack whose voxel size is unknown (calibrated in pixels), where dogResponse blurs z as
+	 *  if the voxels were cubic; null if the stack has a voxel size, or fewer than 3 slices (z is not blurred then). */
+	public static String voxelSizeNote(ImagePlus imp) {
+		if (imp.getNSlices() < 3) return null;
+		ij.measure.Calibration cal = imp.getCalibration();
+		if (cal != null && cal.scaled()) return null;
+		return "the stack has no voxel size (it is calibrated in pixels), so spot detection blurs z as if the voxel depth"
+				+ " equalled the pixel width. If the z step is larger, set the voxel size (Image > Properties) before processing.";
 	}
 
 	/**
