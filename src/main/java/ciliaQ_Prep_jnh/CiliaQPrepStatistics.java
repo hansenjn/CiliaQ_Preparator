@@ -454,4 +454,25 @@ public class CiliaQPrepStatistics {
 			return (key ^ 0x80000000) >>> 16;
 		}
 	}
+	
+	/**
+	 * Numbers for settings files and recorded macros, written so that reading them back gives the same value.
+	 * Values that are exact with the usual number of decimals are written as before, so the files of normal runs do
+	 * not change.
+	 */
+	public static final class Numbers {
+
+		private Numbers(){}
+
+		/**
+		 * @return v with at least minDecimals decimals, and more where needed so that Double.parseDouble gives v back
+		 * (e.g. a contrast sensitivity of 0.0908 is no longer written as 0.091); always a dot, never an exponent.
+		 */
+		public static String exact(double v, int minDecimals){
+			if(Double.isNaN(v) || Double.isInfinite(v))	return Double.toString(v);
+			java.math.BigDecimal b = new java.math.BigDecimal(Double.toString(v));	// the shortest text that gives v back
+			if(b.scale() < minDecimals)	b = b.setScale(minDecimals);	// pad with zeros, never round
+			return b.toPlainString();
+		}
+	}
 }

@@ -1,9 +1,9 @@
 package ciliaQ_Prep_jnh.fraction_threshold;
 
-import java.awt.Font;
-
 import ij.IJ;
 import ij.gui.GenericDialog;
+
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
 
 /**
  * CiliaQ Preparator - settings for the two FRACTION-OF-INTENSITY-RANGE threshold methods.
@@ -150,16 +150,16 @@ public class FractionSettings {
 		StringBuilder sb = new StringBuilder();
 		sb.append("	Fraction-of-range threshold settings:\n");
 		if (local) {
-			sb.append("		Local fraction f	").append(IJ.d2s(fLocal, 4)).append("\n");
+			sb.append("		Local fraction f	").append(Numbers.exact(fLocal, 4)).append("\n");
 			sb.append("		Tile size (px)	").append(tileSize).append("\n");
-			sb.append("		Global fraction f (lower bound)	").append(IJ.d2s(fGlobal, 4)).append("\n");
-			sb.append("		Background percentile	").append(IJ.d2s(bgPercentile, 2)).append("\n");
+			sb.append("		Global fraction f (lower bound)	").append(Numbers.exact(fGlobal, 4)).append("\n");
+			sb.append("		Background percentile	").append(Numbers.exact(bgPercentile, 2)).append("\n");
 			sb.append("		Signal percentile (per tile)	")
-					.append(IJ.d2s(signalPercentileLocal, 2)).append("\n");
+					.append(Numbers.exact(signalPercentileLocal, 2)).append("\n");
 		} else {
-			sb.append("		Fraction f	").append(IJ.d2s(fGlobal, 4)).append("\n");
-			sb.append("		Background percentile	").append(IJ.d2s(bgPercentile, 2)).append("\n");
-			sb.append("		Signal percentile	").append(IJ.d2s(signalPercentileGlobal, 2)).append("\n");
+			sb.append("		Fraction f	").append(Numbers.exact(fGlobal, 4)).append("\n");
+			sb.append("		Background percentile	").append(Numbers.exact(bgPercentile, 2)).append("\n");
+			sb.append("		Signal percentile	").append(Numbers.exact(signalPercentileGlobal, 2)).append("\n");
 		}
 		return sb.toString();
 	}

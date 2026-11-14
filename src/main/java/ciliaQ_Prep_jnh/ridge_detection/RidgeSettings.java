@@ -1,9 +1,9 @@
 package ciliaQ_Prep_jnh.ridge_detection;
 
-import java.util.Vector;
-
 import ij.gui.GenericDialog;
 import ij.IJ;
+
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
 
 /**
  * CiliaQ Preparator - settings for RIDGE DETECTION (Steger line detector).
@@ -477,17 +477,17 @@ public class RidgeSettings implements Cloneable {
 	public String report() {
 		StringBuilder sb = new StringBuilder();
 		sb.append("	Ridge detection settings:\n");
-		sb.append("		Expected filament width (px)	").append(IJ.d2s(lineWidth, 2)).append("\n");
-		sb.append("		Contrast sensitivity	").append(IJ.d2s(sensitivity, 3)).append("\n");
-		sb.append("		Minimum filament length (px)	").append(IJ.d2s(minLength, 1)).append("\n");
+		sb.append("		Expected filament width (px)	").append(Numbers.exact(lineWidth, 2)).append("\n");
+		sb.append("		Contrast sensitivity	").append(Numbers.exact(sensitivity, 3)).append("\n");
+		sb.append("		Minimum filament length (px)	").append(Numbers.exact(minLength, 1)).append("\n");
 		sb.append("		Maximum filament length (px)	")
-				.append(maxLength <= 0 ? "unlimited" : IJ.d2s(maxLength, 1)).append("\n");
+				.append(maxLength <= 0 ? "unlimited" : Numbers.exact(maxLength, 1)).append("\n");
 		sb.append("		Resolve crossings	").append(resolveCrossings).append("\n");
 		sb.append("		Z method	").append(zMethod).append("\n");
 		sb.append("		Copy rule	").append(copyRule).append("\n");
-		sb.append("		Copy brightness ratio	").append(IJ.d2s(copyRatio, 2)).append("\n");
+		sb.append("		Copy brightness ratio	").append(Numbers.exact(copyRatio, 2)).append("\n");
 		sb.append("		Kink rule	").append(kinkRule).append("\n");
-		sb.append("		Kink angle (degrees)	").append(IJ.d2s(kinkAngle, 1)).append("\n");
+		sb.append("		Kink angle (degrees)	").append(Numbers.exact(kinkAngle, 1)).append("\n");
 		sb.append("		Branch rule	").append(branchRule).append("\n");
 		sb.append("		Short pieces	").append(shortPieces).append("\n");
 		sb.append("		Crossing rule	").append(crossingRule).append("\n");
@@ -502,9 +502,10 @@ public class RidgeSettings implements Cloneable {
 		 * state a value that was never used. So print them only once they exist.
 		 */
 		if(isDerived()) {
-			sb.append("		Sigma	").append(IJ.d2s(sigma, 4)).append("\n");
-			sb.append("		Upper threshold	").append(IJ.d2s(upperThreshold, 4)).append("\n");
-			sb.append("		Lower threshold	").append(IJ.d2s(lowerThreshold, 4)).append("\n");
+			// Values set by hand are read back, so exact; derived values are information only
+			sb.append("		Sigma	").append((advancedOverride ? Numbers.exact(sigma, 4) : IJ.d2s(sigma, 4))).append("\n");
+			sb.append("		Upper threshold	").append((advancedOverride ? Numbers.exact(upperThreshold, 4) : IJ.d2s(upperThreshold, 4))).append("\n");
+			sb.append("		Lower threshold	").append((advancedOverride ? Numbers.exact(lowerThreshold, 4) : IJ.d2s(lowerThreshold, 4))).append("\n");
 			if (!advancedOverride) {	// with overridden values deriveFromRange returns at once, so no contrast was used
 				sb.append("		High contrast	").append(IJ.d2s(contrastHigh, 3)).append("\n");
 				sb.append("		Low contrast	").append(IJ.d2s(contrastLow, 3)).append("\n");
@@ -521,12 +522,12 @@ public class RidgeSettings implements Cloneable {
 		sb.append("		Correct position	").append(correctPosition).append("\n");
 		sb.append("		Estimate width	").append(estimateWidth).append("\n");
 		sb.append("		Extend line	").append(extendLine).append("\n");
-		sb.append("		Z-profile smoothing (px, 0 = automatic)	").append(IJ.d2s(zProfileSmoothing, 3)).append("\n");
+		sb.append("		Z-profile smoothing (px, 0 = automatic)	").append(Numbers.exact(zProfileSmoothing, 3)).append("\n");
 		if (zProfileSmoothing <= 0)	// information only, not read back: the value the automatic setting used
 			sb.append("		Z-profile smoothing in use (px)	").append(IJ.d2s(effectiveZProfileSmoothing(), 3)).append("\n");
-		sb.append("		Turn release angle (degrees)	").append(IJ.d2s(turnAngle, 1)).append("\n");
-		sb.append("		Turn release tangent (line widths)	").append(IJ.d2s(turnTangent, 2)).append("\n");
-		sb.append("		Turn release continuity	").append(IJ.d2s(turnContinuity, 3)).append("\n");
+		sb.append("		Turn release angle (degrees)	").append(Numbers.exact(turnAngle, 1)).append("\n");
+		sb.append("		Turn release tangent (line widths)	").append(Numbers.exact(turnTangent, 2)).append("\n");
+		sb.append("		Turn release continuity	").append(Numbers.exact(turnContinuity, 3)).append("\n");
 		return sb.toString();
 	}
 }

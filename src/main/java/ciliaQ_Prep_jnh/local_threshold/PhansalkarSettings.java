@@ -3,6 +3,8 @@ package ciliaQ_Prep_jnh.local_threshold;
 import ij.IJ;
 import ij.gui.GenericDialog;
 
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
+
 /**
  * CiliaQ Preparator - settings for the in-house Phansalkar local threshold.
  *
@@ -114,11 +116,11 @@ public class PhansalkarSettings {
 		sb.append("	Phansalkar local threshold settings:\n");
 		/*	Keys are prefixed rather than bare "k"/"r"/"p"/"q": the settings reader matches keys by
 		 *	PREFIX, so a bare single letter would be shadowed by any future key starting with it. */
-		sb.append("		Radius (px)	").append(IJ.d2s(radius, 3)).append("\n");
-		sb.append("		Constant k	").append(IJ.d2s(k, 4)).append("\n");
-		sb.append("		Constant r	").append(IJ.d2s(r, 4)).append("\n");
-		sb.append("		Constant p	").append(IJ.d2s(p, 4)).append("\n");
-		sb.append("		Constant q	").append(IJ.d2s(q, 4)).append("\n");
+		sb.append("		Radius (px)	").append(Numbers.exact(radius, 3)).append("\n");
+		sb.append("		Constant k	").append(Numbers.exact(k, 4)).append("\n");
+		sb.append("		Constant r	").append(Numbers.exact(r, 4)).append("\n");
+		sb.append("		Constant p	").append(Numbers.exact(p, 4)).append("\n");
+		sb.append("		Constant q	").append(Numbers.exact(q, 4)).append("\n");
 		return sb.toString();
 	}
 }

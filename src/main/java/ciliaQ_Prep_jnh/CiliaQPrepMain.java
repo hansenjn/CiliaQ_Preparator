@@ -42,6 +42,7 @@ import loci.plugins.in.ImporterOptions;
 
 import ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings;
 import ciliaQ_Prep_jnh.CiliaQPrepStatistics.SignalRange;
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
 
 public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
@@ -1650,6 +1651,7 @@ private boolean importSettings() {
 				actualC++;
 			}else if(isUnindentedHeader(line) && (
 					line.startsWith("Threshold(s) for channel")
+					|| line.startsWith("Hysteresis threshold(s) for channel")	// Hysteresis has its own header
 					|| line.startsWith("Ridge detection for channel")
 					|| line.startsWith("Spot detection for channel")
 					|| line.startsWith("Expansion from seeds for channel")
@@ -1758,7 +1760,7 @@ private boolean importSettings() {
 						//Bug fixed in V0.2.0 (IsoData and IJ_IsoData could be confused with prior method)
 						String saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < ProcessSettings.thrAlgorithms.length; a++) {
-							if(saved.equals(ProcessSettings.thrAlgorithms[a])) {
+							if(saved.equalsIgnoreCase(ProcessSettings.thrAlgorithms[a])) {
 								cannySettings [actualC].setLowThresholdAlgorithm(ProcessSettings.thrAlgorithms [a]);
 								break;
 							}
@@ -1787,7 +1789,7 @@ private boolean importSettings() {
 						//Bug fixed in V0.2.0 (IsoData and IJ_IsoData could be confused with prior method)
 						saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < ProcessSettings.thrAlgorithms.length; a++) {
-							if(saved.equals(ProcessSettings.thrAlgorithms[a])) {
+							if(saved.equalsIgnoreCase(ProcessSettings.thrAlgorithms[a])) {
 								cannySettings [actualC].setHighThresholdAlgorithm(ProcessSettings.thrAlgorithms [a]);
 								break;
 							}
@@ -1820,7 +1822,7 @@ private boolean importSettings() {
 						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
 						String saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < hystAlgorithms.length; a++) {
-							if(saved.equals(hystAlgorithms[a])) {
+							if(saved.equalsIgnoreCase(hystAlgorithms[a])) {
 								chosenLowAlg [actualC] = (hystAlgorithms [a]);
 								break;
 							}
@@ -1850,7 +1852,7 @@ private boolean importSettings() {
 						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
 						saved = line.substring(line.lastIndexOf("	")+1).trim();
 						for(int a = 0; a < hystAlgorithms.length; a++) {
-							if(saved.equals(hystAlgorithms[a])) {
+							if(saved.equalsIgnoreCase(hystAlgorithms[a])) {
 								chosenHighAlg [actualC] = (hystAlgorithms [a]);
 								break;
 							}
@@ -1898,7 +1900,7 @@ private boolean importSettings() {
 						if(s >= 0 && e > s){
 							String savedAlg = line.substring(s + "based on the ".length(), e).trim();
 							for(int a = 0; a < algorithm.length; a++) {
-								if(savedAlg.equals(algorithm[a])) {
+								if(savedAlg.equalsIgnoreCase(algorithm[a])) {
 									chosenAlgorithms [actualC] = algorithm [a];
 									break;
 								}
@@ -2301,21 +2303,108 @@ private static boolean isUnindentedHeader(String line){
 }
 
 /**
- * Test for a bare, valueless flag such as "c1-duplicate" or "keep-awake".
+ * Test whether a flag such as "c1-duplicate" or "keep-awake" is on in the macro options. A flag is on when it is written:
+ * 	- alone ("c1-duplicate"), as the recorder writes it;
+ * 	- as key=true, in any case and with or without brackets ("c1-duplicate=TRUE", "c1-duplicate=[true]").
+ * 
+ * It is off when it is absent or written as key=false. Any other value, e.g. "c1-duplicate=yes", is reported as a macro
+ * warning and read as off, so a typo cannot switch an option on without a word.
+ * 
+ * New in V0.2.1: the key=true and key=false forms. In v0.2.0, "c1-duplicate=true" was read as off without a message.
+ * Since hand-written and LLM-written macros often write flags this way, such a macro now runs as its text says, e.g.
+ * "c1-ridge-dark=true" really detects dark lines.
  *
- * The option string is padded with a leading and trailing space and the flag is searched
- * for being surrounded by spaces (" key "). This delimiting is essential: it prevents one flag
- * name from matching inside another (e.g. "c1-blur" inside "c1-preblur") and prevents a
- * flag from matching the prefix of a "key=value" option.
+ * The flag is matched only as a whole option: the option string is padded with spaces, and the flag is searched as
+ * " key " or " key=". Since one flag name can end inside another, this keeps e.g. "c1-preblur" from switching on
+ * "c1-blur".
  *
- * @param options the full macro option string (may be null)
- * @param key     the flag name to look for
- * @return true if the flag is present as a standalone token, false otherwise
+ * Absent and key=false both return false. For a flag that is on by default, use macroFlagFalse to tell them apart.
+ *
+ * @param options	the full macro option string (may be null)
+ * @param key		the flag name, e.g. "c1-duplicate"
+ * @return true if the flag is written alone or as key=true; false if it is absent, set to false or not understood
  */
 private boolean macroFlag(String options, String key){
 	if(options == null) return false;
 	String padded = " " + options + " ";
-	return padded.contains(" " + key + " ");
+	if(padded.contains(" " + key + " "))	return true;
+	
+	// The key=value form: only true and false are understood (see above)
+	String v = flagValue(padded, key);
+	if(v == null)	return false;
+	if(v.equalsIgnoreCase("true"))	return true;
+	if(!v.equalsIgnoreCase("false")){
+		addMacroWarning("'" + key + "=" + v + "' is not understood: write the flag alone,"
+				+ " or as " + key + "=true or " + key + "=false - read as off");
+	}
+	return false;
+}
+
+/** New in V0.2.1: true if a flag is explicitly set to false ("key=false"), for flags that are on by default. */
+private boolean macroFlagFalse(String options, String key){
+	if(options == null) return false;
+	String v = flagValue(" " + options + " ", key);
+	return v != null && v.equalsIgnoreCase("false");
+}
+
+/** New in V0.2.1: the value of " key=value " in a space-padded option string (brackets removed), or null. */
+private static String flagValue(String padded, String key){
+	int at = padded.indexOf(" " + key + "=");
+	if(at < 0)	return null;
+	int from = at + key.length() + 2;
+	return padded.substring(from, padded.indexOf(' ', from)).replace("[", "").replace("]", "");
+}
+
+
+/**
+ * New in V0.2.1: with settings=[file], every per-channel setting comes from the file and the other keys are not read;
+ * name them, so a macro that also passes e.g. c1-method=[Otsu] is not silently run with the file's method.
+ */
+private void warnKeysIgnoredBySettingsFile(String options){
+	// the file's "Number format:" line (since 2b) overrides number-format=, so it is named then; files without the line keep the macro's
+	boolean fileHasFormat = false;
+	try{
+		fileHasFormat = new String(java.nio.file.Files.readAllBytes(new File(macroValue(options, "settings")).toPath()),
+				java.nio.charset.StandardCharsets.ISO_8859_1).contains("Number format:");
+	}catch(Exception e){
+		// an unreadable file is reported where it is read; here it only decides the warning
+		fileHasFormat = false;
+	}
+	java.util.List<String> ignored = new java.util.ArrayList<String>();
+	for(String k : macroKeys(options)){
+		if(k.equals("settings") || k.equals("process") || k.equals("output") || k.equals("keep-awake"))	continue;
+		if(k.equals("number-format") && !fileHasFormat)	continue;
+		ignored.add(k);
+	}
+	if(!ignored.isEmpty()){
+		addMacroWarning("settings=[...] supplies the settings, so these keys were not read: " + String.join(", ", ignored));
+	}
+}
+
+/** New in V0.2.1: the keys of a macro option string ("key=value", "key=[a b]", "key=//[a b//]", bare flags), in order. */
+private static java.util.List<String> macroKeys(String options){
+	java.util.List<String> keys = new java.util.ArrayList<String>();
+	if(options == null)	return keys;
+	int i = 0, n = options.length();
+	while(i < n){
+		while(i < n && options.charAt(i) == ' ')	i++;
+		int start = i;
+		while(i < n && options.charAt(i) != ' ' && options.charAt(i) != '=')	i++;
+		if(i > start)	keys.add(options.substring(start, i));
+		if(i < n && options.charAt(i) == '='){
+			i++;
+			if(options.startsWith("[", i)){
+				int close = options.indexOf(']', i);
+				i = close < 0 ? n : close + 1;
+			}else if(options.startsWith("//[", i)){
+				int close = options.indexOf("//]", i);
+				i = close < 0 ? n : close + 3;
+			}else{
+				while(i < n && options.charAt(i) != ' ')	i++;
+			}
+		}
+	}
+	return keys;
 }
 
 /**	Log a macro problem and keep it for the progress reporter and the metadata file (once per text). */
@@ -2359,8 +2448,22 @@ private String macroChoice(String options, String key, String [] allowed, String
 	}
 	if(hit != null) return hit;
 	
+	/*	Case does not matter ("custom threshold", "otsu"): the same two passes ignoring case,
+	 *	only after the case-sensitive passes found nothing, so every value that matched before
+	 *	still gives the same result. */
+	for(int i = 0; i < allowed.length; i++){
+		if(allowed[i].equalsIgnoreCase(text)) return allowed[i];
+	}
+	String low = text.toLowerCase(Locale.ROOT);
+	for(int i = 0; i < allowed.length; i++){
+		if(allowed[i].toLowerCase(Locale.ROOT).contains(low)){
+			if(hit != null){ hit = null; break; }
+			hit = allowed[i];
+		}
+	}
+	if(hit != null) return hit;
+	
 	/*
-	 * New in V0.2.1:
 	 * Fixing that an unrecognised macro value was reported to IJ.log ONLY, which nobody reads during a batch
 	 * run, so a typo in a macro silently changed the method and the run looked successful. Now: We collect it
 	 * and surface it through the progress reporter and the metadata file once the run starts.
@@ -2941,17 +3044,45 @@ private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_de
 }
 
 /**
- * Set all settings from a macro option string. Missing keys keep their defaults.
+ * Sets all settings from a macro option string, as written by the macro recorder (createRecordString) or by hand.
+ * 
+ * The keys are read in two parts:
+ * 	- first the keys for the whole run: process, keep-awake, output and number-format;
+ * 	- then the per-channel settings, either from a settings file (settings=[path], route A) or from the option string
+ * 	  itself (route B).
+ * 
+ * With settings=[path], the file supplies every per-channel setting. Any other key in the string is named in a macro
+ * warning, and so is number-format if the file has a "Number format:" line, which overrides it.
+ * 
+ * In route B, a missing key keeps its default, with one exception. A channel without c<n>-duplicate or
+ * c<n>-no-duplicate gets no unsegmented copy, plus a warning, since macros written before v0.2.1 rely on that channel
+ * layout.
+ * 
+ * Choices match exactly first, then as a unique abbreviation, then the same two ignoring case. Flags are also read as
+ * key=true and key=false. An unknown choice or flag value is reported as a macro warning and read as its default.
+ * 
+ * Since every option string is logged and every problem is reported, the log and the report show what a hand-written
+ * or LLM-written macro actually ran. For example, a misspelled "c1-method=[Otzu]" shows up as a warning, not only as an
+ * unexpected image.
+ * 
  * Mirrors CiliaQMain.readSettingsFromMacroString.
- * @return false if the settings could not be established.
+ *
+ * @param options	the macro option string (Macro.getOptions())
+ * @return false if the settings could not be established: fewer than 1 channel, or a settings file that could not be
+ * 			imported
  */
 private boolean readSettingsFromMacroString(String options){
 	IJ.log(PLUGIN_NAME + " " + PLUGIN_VERSION + ": reading settings from macro options.");
 	IJ.log("  options: " + options);
 
-	// In macro mode we always work on the front-most image; the multi-task manager and
-	// the file dialogs are GUI-only.
-	selectedTaskVariant = taskVariant[0];
+	/*	New in V0.2.1: the task comes from "process="; v0.2.0 always processed the front image, so "all images open in
+	 *	FIJI" ran on one image without a message. The multi-file mode needs its file dialog, so a macro falls back to the
+	 *	active image, with a warning. */
+	selectedTaskVariant = macroChoice(options, "process", taskVariant, taskVariant[0]);
+	if(selectedTaskVariant.equals(taskVariant[1])){
+		addMacroWarning("process=[" + taskVariant[1] + "] needs the file dialog and cannot run from a macro - the active image is processed");
+		selectedTaskVariant = taskVariant[0];
+	}
 	showGUIs = false;
 	keepAwake = macroFlag(options, "keep-awake");
 
@@ -2967,8 +3098,13 @@ private boolean readSettingsFromMacroString(String options){
 		df0.setDecimalFormatSymbols(reportSymbols(Locale.GERMANY));
 	}
 
-	// Route A: a metadata file supplies every per-channel setting.
+	// Route A: a settings file supplies every per-channel setting;
+	// the other keys are named in a warning (warnKeysIgnoredBySettingsFile).
 	if(macroValue(options, "settings") != null){
+		
+		// New in V0.2.1: when the file supplies the settings; name the keys it overrides
+		warnKeysIgnoredBySettingsFile(options);
+		
 		selectedSettingsVariant = settingsMethod[1];
 		return importSettings();
 	}
@@ -2988,7 +3124,24 @@ private boolean readSettingsFromMacroString(String options){
 	for(int c = 0; c < nChannels; c++){
 		String p = "c" + (c+1) + "-";
 		channelIDs [c] = macroInt(options, p + "nr", c+1);
-		includeDuplicateChannel [c] = macroFlag(options, p + "duplicate");
+		
+		/*	New in V0.2.1: explicit in both directions. "c<n>-duplicate" (or =true) on, "c<n>-no-duplicate" (or c<n>-duplicate=false)
+		 *	off. A macro with neither was written before both existed: no copy, as it was written for (adding it would shift
+		 *	the output channels a later CiliaQ macro relies on), with a notification. Settings files unchanged. */
+		String padded = " " + options + " ";
+		// "c<n>-no-duplicate=false" means "not without the copy", so it counts as on
+		boolean dupOn = macroFlag(options, p + "duplicate") || macroFlagFalse(options, p + "no-duplicate");
+		boolean dupOff = macroFlag(options, p + "no-duplicate") || macroFlagFalse(options, p + "duplicate");
+		// either key written at all (as a flag or with a value; a value not understood is reported by macroFlag)
+		boolean dupKeyGiven = padded.contains(" " + p + "duplicate ") || padded.contains(" " + p + "no-duplicate ")
+				|| flagValue(padded, p + "duplicate") != null || flagValue(padded, p + "no-duplicate") != null;
+		if(dupOn && dupOff){
+			addMacroWarning("'" + p + "duplicate' and '" + p + "no-duplicate' contradict each other - no unsegmented copy");
+		}else if(!dupKeyGiven){
+			addMacroWarning("neither '" + p + "duplicate' nor '" + p + "no-duplicate' given - no unsegmented copy, as in"
+					+ " macros written before v0.2.1 (the dialog includes it by default); add one of the two to choose");
+		}
+		includeDuplicateChannel [c] = dupOn && !dupOff;
 
 		medianFilter [c] = macroValue(options, p + "median") != null;
 		if(medianFilter [c]) medianRadius [c] = macroDouble(options, p + "median", medianRadius [c]);
@@ -3092,14 +3245,31 @@ private boolean readSettingsFromMacroString(String options){
 	return true;
 }
 
-/**	The macro keys of ridge settings; key = "c<n>-ridge-" or, for the seed tool's ridge seeds, "c<n>-exp-ridge-". */
-private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
+/**
+ * The macro keys that reproduce one set of ridge settings, for the macro recorder (createRecordString). The prefix is
+ * "c<n>-ridge-" for ridge detection, or "c<n>-exp-ridge-" for the ridge seeds of expansion from seeds. Both read the
+ * same keys (readRidgeMacro), so both are written here. What is written:
+ * 	- every number and choice, also when it equals the default: width, sensitivity, minimum length, z method, copy
+ * 	  ratio, kink angle, short pieces, z-profile smoothing and the three turn values;
+ * 	- the maximum length only when it is limited, since 0 (unlimited) is what a missing key means;
+ * 	- the switches only when they differ from their default, since those defaults are part of the macro language;
+ * 	- sigma and the two thresholds only when set by hand (advanced override). Otherwise they are derived from each image
+ * 	  and must not be pinned to the values of the image the macro was recorded on.
+ * Numbers are written with Numbers.exact: as many decimals as reading them back needs, always with a dot. A sensitivity
+ * of 0.0908 is therefore recorded as 0.0908, not 0.091, and a run in German number format records 1.500, not 1,500.
+ * Since every number is recorded, a macro recorded today finds the same filaments in a later version even if that
+ * version changes a default, e.g. the turn angle.
+ *
+ * @param key	the prefix of every key, "c<n>-ridge-" or "c<n>-exp-ridge-"
+ * @param rs	the ridge settings to record
+ * @return the keys, each followed by a space
+ */private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
 	String s = "";
-	s += key + "width=" + df3.format(rs.lineWidth) + " ";
-	s += key + "sensitivity=" + df3.format(rs.sensitivity) + " ";
-	s += key + "min-length=" + df3.format(rs.minLength) + " ";
+	s += key + "width=" + Numbers.exact(rs.lineWidth, 3) + " ";
+	s += key + "sensitivity=" + Numbers.exact(rs.sensitivity, 3) + " ";
+	s += key + "min-length=" + Numbers.exact(rs.minLength, 3) + " ";
 	if (rs.maxLength > 0)
-		s += key + "max-length=" + df3.format(rs.maxLength) + " ";
+		s += key + "max-length=" + Numbers.exact(rs.maxLength, 3) + " ";
 	if (!rs.resolveCrossings)
 		s += key + "no-crossings ";
 	if (rs.darkLine)
@@ -3111,40 +3281,28 @@ private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSett
 	if (!rs.extendLine)
 		s += key + "no-extend-line ";
 
-	/*
-	 * Z method (always), clean-up switches when they differ from the default,
-	 * numbers when they differ from a fresh default object (so the defaults live in
-	 * RidgeSettings only).
-	 */
-	ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rd = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings
-			.initDefault();
+	// Z method, short pieces and every number always;
+	// the clean-up switches only when they differ from the default (see above)
 	s += key + "z=" + rs.zMethodToken() + " ";
 	if (rs.copyRule)
 		s += key + "copy-rule ";
-	if (rs.copyRatio != rd.copyRatio)
-		s += key + "copy-ratio=" + df3.format(rs.copyRatio) + " ";
+	s += key + "copy-ratio=" + Numbers.exact(rs.copyRatio, 3) + " ";
 	if (rs.kinkRule)
 		s += key + "kink-rule ";
-	if (rs.kinkAngle != rd.kinkAngle)
-		s += key + "kink-angle=" + df3.format(rs.kinkAngle) + " ";
+	s += key + "kink-angle=" + Numbers.exact(rs.kinkAngle, 3) + " ";
 	if (!rs.branchRule)
 		s += key + "no-branch-rule ";
-	if (!rs.shortPieces.equals(rd.shortPieces))
-		s += key + "short-pieces=" + rs.shortPiecesToken() + " ";
+	s += key + "short-pieces=" + rs.shortPiecesToken() + " ";
 	if (!rs.crossingRule)
 		s += key + "no-crossing-rule ";
 	if (rs.parallelRule)
 		s += key + "parallel-rule ";
 	if (!rs.turnRelease)
 		s += key + "no-turn-release ";
-	if (rs.zProfileSmoothing != rd.zProfileSmoothing)
-		s += key + "z-smoothing=" + df3.format(rs.zProfileSmoothing) + " ";
-	if (rs.turnAngle != rd.turnAngle)
-		s += key + "turn-angle=" + df3.format(rs.turnAngle) + " ";
-	if (rs.turnTangent != rd.turnTangent)
-		s += key + "turn-tangent=" + df3.format(rs.turnTangent) + " ";
-	if (rs.turnContinuity != rd.turnContinuity)
-		s += key + "turn-continuity=" + df3.format(rs.turnContinuity) + " ";
+	s += key + "z-smoothing=" + Numbers.exact(rs.zProfileSmoothing, 3) + " ";
+	s += key + "turn-angle=" + Numbers.exact(rs.turnAngle, 3) + " ";
+	s += key + "turn-tangent=" + Numbers.exact(rs.turnTangent, 3) + " ";
+	s += key + "turn-continuity=" + Numbers.exact(rs.turnContinuity, 3) + " ";
 
 	/*
 	 * Record the advanced values only when the user overrode them, so a recorded
@@ -3152,20 +3310,40 @@ private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSett
 	 * derived.
 	 */
 	if (rs.advancedOverride) {
-		s += key + "sigma=" + df6.format(rs.sigma) + " ";
-		s += key + "upper=" + df6.format(rs.upperThreshold) + " ";
-		s += key + "lower=" + df6.format(rs.lowerThreshold) + " ";
+		s += key + "sigma=" + Numbers.exact(rs.sigma, 6) + " ";
+		s += key + "upper=" + Numbers.exact(rs.upperThreshold, 6) + " ";
+		s += key + "lower=" + Numbers.exact(rs.lowerThreshold, 6) + " ";
 	}
 	return s;
 }
 
 /**
- * @return an option string that reproduces the current settings when passed back to this
- * plugin. Mirrors CiliaQMain.createRecordString.
+ * The macro option string that reproduces the current run when passed back to this plugin, for ImageJ's macro
+ * recorder. It holds:
+ * 	- the keys for the whole run: process, keep-awake (only when on), output, number-format, segmentation-style and
+ * 	  channels;
+ * 	- per channel (prefix "c<n>-"): the channel number, the unsegmented copy (c<n>-duplicate or c<n>-no-duplicate),
+ * 	  the preprocessing steps that are on, the method with the parameters it uses, and the stack handling (not for
+ * 	  CANNY 3D, which handles the stack itself).
+ * Every per-channel setting is written as keys, never as settings=[file]. Since the string holds every value it needs,
+ * a recorded macro still runs after the report it came from was moved or deleted.
+ *
+ * New in V0.2.1: the task as chosen, keep-awake, c<n>-no-duplicate and exact numbers. v0.2.0 always recorded the active
+ * image and wrote numbers with 3 or 6 decimals in the chosen number format, so a recorded macro could run with other
+ * values than the run it was recorded from. This is now corrected, too.
+ * 
+ * Mirrors CiliaQMain.createRecordString.
+ *
+ * @return the option string; each key is followed by a space
  */
-private String createRecordString(){
+ private String createRecordString(){
 	String s = "";
-	s += "process=[" + taskVariant[0] + "] ";
+	// New in V0.2.1: the task as chosen (the reader reads it now); the multi-file mode needs its dialog, so it records the active image
+	s += "process=[" + (selectedTaskVariant.equals(taskVariant[1]) ? taskVariant[0] : selectedTaskVariant) + "] ";
+	if(keepAwake) {
+		// New in V0.2.1: recorded (a macro flag; not part of the settings file)
+		s += "keep-awake ";
+	}
 	s += "output=[" + chosenOutputName + "] ";
 	s += "number-format=[" + ChosenNumberFormat + "] ";
 	s += "segmentation-style=[" + chosenImageStyle + "] ";
@@ -3177,56 +3355,58 @@ private String createRecordString(){
 		
 		if (includeDuplicateChannel[c])
 			s += p + "duplicate ";
+		else
+			s += p + "no-duplicate ";	// both directions explicit: a macro with neither key keeps no copy, with a warning
 		if (medianFilter[c])
-			s += p + "median=" + df3.format(medianRadius[c]) + " ";
+			s += p + "median=" + Numbers.exact(medianRadius[c], 3) + " ";
 		if (preBlur[c])
-			s += p + "preblur=" + df3.format(preBlurRadius[c]) + " ";
+			s += p + "preblur=" + Numbers.exact(preBlurRadius[c], 3) + " ";
 		if (subtractBackground[c])
-			s += p + "subtract-bg=" + df3.format(subtractBGRadius[c]) + " ";
+			s += p + "subtract-bg=" + Numbers.exact(subtractBGRadius[c], 3) + " ";
 		if (divideBackground[c])
-			s += p + "divide-bg=" + df3.format(divideBGRadius[c]) + " ";
+			s += p + "divide-bg=" + Numbers.exact(divideBGRadius[c], 3) + " ";
 		if (additionalBlur[c])
-			s += p + "blur=" + df3.format(additionalBlurRadius[c]) + " ";
+			s += p + "blur=" + Numbers.exact(additionalBlurRadius[c], 3) + " ";
 		
 		s += p + "method=[" + chosenAlgorithms[c] + "] ";
 		if (chosenAlgorithms[c].equals("CUSTOM threshold")) {
-			s += p + "custom-thr=" + df6.format(customThr[c]) + " ";
+			s += p + "custom-thr=" + Numbers.exact(customThr[c], 6) + " ";
 		} else if (chosenAlgorithms[c].equals("HYSTERESIS threshold")) {
 			s += p + "hyst-low=[" + chosenLowAlg[c] + "] ";
 			s += p + "hyst-high=[" + chosenHighAlg[c] + "] ";
 			if (chosenLowAlg[c].equals(hystAlgorithms[0]))
-				s += p + "hyst-low-thr=" + df6.format(customLowThr[c]) + " ";
+				s += p + "hyst-low-thr=" + Numbers.exact(customLowThr[c], 6) + " ";
 			if (chosenHighAlg[c].equals(hystAlgorithms[0]))
-				s += p + "hyst-high-thr=" + df6.format(customHighThr[c]) + " ";
+				s += p + "hyst-high-thr=" + Numbers.exact(customHighThr[c], 6) + " ";
 		}else if(chosenAlgorithms [c].equals(RIDGE_DETECTION)){
 			s += recordRidge(p + "ridge-", ridgeSettings[c]);	// Shared with the seed tool (exp-ridge-)
 		}else if(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c])){
-			s += p + "phansalkar-radius=" + df3.format(phansalkarSettings[c].radius) + " ";
-			s += p + "phansalkar-k=" + df6.format(phansalkarSettings[c].k) + " ";
-			s += p + "phansalkar-r=" + df6.format(phansalkarSettings[c].r) + " ";
-			s += p + "phansalkar-p=" + df6.format(phansalkarSettings[c].p) + " ";
-			s += p + "phansalkar-q=" + df6.format(phansalkarSettings[c].q) + " ";
+			s += p + "phansalkar-radius=" + Numbers.exact(phansalkarSettings[c].radius, 3) + " ";
+			s += p + "phansalkar-k=" + Numbers.exact(phansalkarSettings[c].k, 6) + " ";
+			s += p + "phansalkar-r=" + Numbers.exact(phansalkarSettings[c].r, 6) + " ";
+			s += p + "phansalkar-p=" + Numbers.exact(phansalkarSettings[c].p, 6) + " ";
+			s += p + "phansalkar-q=" + Numbers.exact(phansalkarSettings[c].q, 6) + " ";
 		}else if(ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(
 				chosenAlgorithms [c])){
 			boolean loc = ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.LOCAL.equals(
 					chosenAlgorithms [c]);
 			if(loc){
-				s += p + "fraction-f-local=" + df6.format(fractionSettings [c].fLocal) + " ";
+				s += p + "fraction-f-local=" + Numbers.exact(fractionSettings [c].fLocal, 6) + " ";
 				s += p + "fraction-tile=" + df0.format(fractionSettings [c].tileSize) + " ";
-				s += p + "fraction-f=" + df6.format(fractionSettings [c].fGlobal) + " ";
+				s += p + "fraction-f=" + Numbers.exact(fractionSettings [c].fGlobal, 6) + " ";
 				s += p + "fraction-signal-percentile-local="
-						+ df3.format(fractionSettings [c].signalPercentileLocal) + " ";
+						+ Numbers.exact(fractionSettings [c].signalPercentileLocal, 3) + " ";
 			}else{
-				s += p + "fraction-f=" + df6.format(fractionSettings [c].fGlobal) + " ";
+				s += p + "fraction-f=" + Numbers.exact(fractionSettings [c].fGlobal, 6) + " ";
 				s += p + "fraction-signal-percentile="
-						+ df3.format(fractionSettings [c].signalPercentileGlobal) + " ";
+						+ Numbers.exact(fractionSettings [c].signalPercentileGlobal, 3) + " ";
 			}
-			s += p + "fraction-bg-percentile=" + df3.format(fractionSettings [c].bgPercentile) + " ";
+			s += p + "fraction-bg-percentile=" + Numbers.exact(fractionSettings [c].bgPercentile, 3) + " ";
 		}else if(chosenAlgorithms [c].equals(EXPANSION_SEEDS)){
 			s += p + "exp-seeds=[" + expansionSettings [c].seedSource + "] ";
 			s += p + "exp-low=[" + expansionSettings [c].lowThrAlgorithm + "] ";
 			if(expansionSettings [c].customValueForLowThreshold())
-				s += p + "exp-low-thr=" + df6.format(expansionSettings [c].customLowThr) + " ";
+				s += p + "exp-low-thr=" + Numbers.exact(expansionSettings [c].customLowThr, 6) + " ";
 			s += p + "exp-min-piece=" + df0.format(expansionSettings [c].minPieceSize) + " ";
 			/* Only the chosen source's parameters are written, so a recorded macro says what actually
 			 * mattered rather than three sets of numbers of which two were ignored. */
@@ -3237,29 +3417,28 @@ private String createRecordString(){
 					ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_HIGH)){
 				s += p + "exp-seed-alg=[" + expansionSettings [c].seedThrAlgorithm + "] ";
 				if(expansionSettings [c].customValueForSeedThreshold())
-					s += p + "exp-seed-thr=" + df6.format(expansionSettings [c].customSeedThr) + " ";
+					s += p + "exp-seed-thr=" + Numbers.exact(expansionSettings [c].customSeedThr, 6) + " ";
 			}else{
-				s += p + "exp-spot-diameter=" + df3.format(expansionSettings [c].spotDiameter) + " ";
-				s += p + "exp-spot-sensitivity=" + df6.format(expansionSettings [c].spotSensitivity) + " ";
+				s += p + "exp-spot-diameter=" + Numbers.exact(expansionSettings [c].spotDiameter, 3) + " ";
+				s += p + "exp-spot-sensitivity=" + Numbers.exact(expansionSettings [c].spotSensitivity, 6) + " ";
 			}
 		}else if(chosenAlgorithms [c].equals(SPOT_DETECTION)){
-			s += p + "spot-diameter=" + df3.format(spotSettings [c].diameter) + " ";
-			s += p + "spot-variation=" + df3.format(spotSettings [c].variation) + " ";
-			s += p + "spot-sensitivity=" + df6.format(spotSettings [c].sensitivity) + " ";
-			s += p + "spot-ratio=" + df3.format(spotSettings [c].scaleRatio) + " ";
+			s += p + "spot-diameter=" + Numbers.exact(spotSettings [c].diameter, 3) + " ";
+			s += p + "spot-variation=" + Numbers.exact(spotSettings [c].variation, 3) + " ";
+			s += p + "spot-sensitivity=" + Numbers.exact(spotSettings [c].sensitivity, 6) + " ";
+			s += p + "spot-ratio=" + Numbers.exact(spotSettings [c].scaleRatio, 3) + " ";
 			s += p + "spot-min-intensity=" + (spotSettings [c].autoMinIntensity
-					? "auto" : df6.format(spotSettings [c].minIntensity)) + " ";
+					? "auto" : Numbers.exact(spotSettings [c].minIntensity, 6)) + " ";
 		}else if(chosenAlgorithms [c].equals("CANNY 3D")){
 			s += p + "canny-sigma=" + cannySettings [c].getGaussSigma() + " ";
 			s += p + "canny-alpha=" + cannySettings [c].getCannyAlpha() + " ";
 			s += p + "canny-low=[" + cannySettings [c].getLowThresholdAlgorithm() + "] ";
 			s += p + "canny-high=[" + cannySettings [c].getHighThresholdAlgorithm() + "] ";
-			/*	New V0.2.1: the custom values, so a recorded Canny 3D with "Custom Value" reproduces the run
-			 *	(the reader knew both keys; the recorder did not write them). */
+			/*	The custom values, so a recorded Canny 3D with "Custom Value" reproduces the run. */
 			if(cannySettings [c].getLowThresholdAlgorithm().equals(ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings.thrAlgorithms [0]))
-				s += p + "canny-low-thr=" + df6.format(cannySettings [c].getLowThreshold()) + " ";
+				s += p + "canny-low-thr=" + Numbers.exact(cannySettings [c].getLowThreshold(), 6) + " ";
 			if(cannySettings [c].getHighThresholdAlgorithm().equals(ciliaQ_Prep_jnh.canny3d_thresholder.ProcessSettings.thrAlgorithms [0]))
-				s += p + "canny-high-thr=" + df6.format(cannySettings [c].getHighThreshold()) + " ";
+				s += p + "canny-high-thr=" + Numbers.exact(cannySettings [c].getHighThreshold(), 6) + " ";
 		}
 		if(!chosenAlgorithms [c].equals("CANNY 3D")){
 
@@ -5318,7 +5497,7 @@ private java.util.HashMap<String,String> readIndentedBlock(BufferedReader br) th
 private String matchThrAlgorithm(String saved, String fallback){
 	saved = saved.trim();
 	for(int a = 0; a < ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms.length; a++){
-		if(saved.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms [a]))
+		if(saved.equalsIgnoreCase(ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms [a]))
 			return ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms [a];
 	}
 	IJ.log(PLUGIN_NAME + ": unknown threshold method '" + saved + "', keeping " + fallback);

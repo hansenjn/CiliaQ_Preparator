@@ -1,7 +1,8 @@
 package ciliaQ_Prep_jnh.expansion;
 
-import ij.IJ;
 import ij.gui.GenericDialog;
+
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
 
 /**
  * CiliaQ Preparator - settings for EXPANSION from seeds.
@@ -181,7 +182,7 @@ public class ExpansionSettings {
 		sb.append("		Seed source	").append(seedSource).append("\n");
 		sb.append("		Threshold for the object extent	").append(lowThrAlgorithm).append("\n");
 		if (customValueForLowThreshold())
-			sb.append("		Manually selected threshold	").append(IJ.d2s(customLowThr, 4)).append("\n");
+			sb.append("		Manually selected threshold	").append(Numbers.exact(customLowThr, 4)).append("\n");
 		sb.append("		Minimum object size after splitting (voxels)	").append(minPieceSize).append("\n");
 		if (seedSource.equals(SEED_RIDGE)) {
 			/*	The full ridge settings, one level deeper, with the labels of RIDGE DETECTION, so the
@@ -194,12 +195,12 @@ public class ExpansionSettings {
 			sb.append("		High core seed - seed threshold	").append(seedThrAlgorithm).append("\n");
 			if (customValueForSeedThreshold())
 				sb.append("		High core seed - manually selected seed threshold	")
-						.append(IJ.d2s(customSeedThr, 4)).append("\n");
+					.append(Numbers.exact(customSeedThr, 4)).append("\n");
 		} else if (seedSource.equals(SEED_SPOT)) {
 			sb.append("		Spot seed - expected diameter (px)	")
-					.append(IJ.d2s(spotDiameter, 2)).append("\n");
+				.append(Numbers.exact(spotDiameter, 2)).append("\n");
 			sb.append("		Spot seed - sensitivity (grey levels)	")
-					.append(IJ.d2s(spotSensitivity, 3)).append("\n");
+				.append(Numbers.exact(spotSensitivity, 3)).append("\n");
 		}
 		return sb.toString();
 	}

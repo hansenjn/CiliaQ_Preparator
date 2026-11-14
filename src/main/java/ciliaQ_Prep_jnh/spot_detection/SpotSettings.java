@@ -4,6 +4,7 @@ import ij.IJ;
 import ij.gui.GenericDialog;
 
 import ciliaQ_Prep_jnh.CiliaQPrepMain;
+import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
 
 /**
  * CiliaQ Preparator - settings for SPOT DETECTION (multi-scale DoG plus MaximumFinder).
@@ -146,10 +147,10 @@ public class SpotSettings {
 	public String report() {
 		StringBuilder sb = new StringBuilder();
 		sb.append("	Spot detection settings:\n");
-		sb.append("		Expected object diameter (px)	").append(IJ.d2s(diameter, 3)).append("\n");
-		sb.append("		Diameter variation (px)	").append(IJ.d2s(variation, 3)).append("\n");
-		sb.append("		Sensitivity (grey levels)	").append(IJ.d2s(sensitivity, 4)).append("\n");
-		sb.append("		Scale ratio	").append(IJ.d2s(scaleRatio, 3)).append("\n");
+		sb.append("		Expected object diameter (px)	").append(Numbers.exact(diameter, 3)).append("\n");
+		sb.append("		Diameter variation (px)	").append(Numbers.exact(variation, 3)).append("\n");
+		sb.append("		Sensitivity (grey levels)	").append(Numbers.exact(sensitivity, 4)).append("\n");
+		sb.append("		Scale ratio	").append(Numbers.exact(scaleRatio, 3)).append("\n");
 		double[] sigmas = scales();
 		StringBuilder sigmaList = new StringBuilder();
 		for (int i = 0; i < sigmas.length; i++) {
@@ -160,7 +161,7 @@ public class SpotSettings {
 		sb.append("		Z consolidation	one spot per peak of the intensity profile through z\n");
 		sb.append("		Auto minimum spot intensity	").append(autoMinIntensity).append("\n");
 		if (!autoMinIntensity)
-			sb.append("		Minimum spot intensity (override)	").append(IJ.d2s(minIntensity, 4)).append("\n");
+			sb.append("		Minimum spot intensity (override)	").append(Numbers.exact(minIntensity, 4)).append("\n");
 		return sb.toString();
 	}
 }
