@@ -35,12 +35,12 @@ import ij.process.ShortProcessor;
  *     stack-wide statistics (in RidgeSettings) and reused for every plane - deriving them per slice
  *     makes the line count swing wildly from plane to plane, which is threshold inconsistency rather
  *     than real structure and makes z-linking impossible.
- *  2. THE Z METHOD (RidgeSettings.zMethod, new in v0.2.1). Classic 2D (below, and every single-plane image)
+ *  2. THE Z METHOD (RidgeSettings.zMethod). Classic 2D (below, and every single-plane image)
  *     paints every plane a line is found in and joins lines of adjacent planes that share pixels (union-find,
  *     largest overlap first; the overlap is NOT dilated, dilation raises the over-fusion). "2D in-focus
  *     plane" and "3D" keep each detection only in its in-focus plane and join it to its 3D neighbours; 3D
  *     also pairs the branches of crossings across planes (RidgeZ).
- *  3. CLEAN-UP RULES (RidgeCleanup, new in v0.2.1). Per plane, lines that belong to different filaments -
+ *  3. CLEAN-UP RULES (RidgeCleanup). Per plane, lines that belong to different filaments -
  *     a line ending on another's side, two lines traced through one crossing, optionally lines running
  *     side by side or the arms of a kink - are kept apart: they are never joined into one object.
  *     The minimum length applies to the finished object (its distinct xy positions in classic), so the
@@ -112,8 +112,6 @@ public class RidgeSegmenter {
 	// ------------------------------------------------------------------ detection
 
 	/**
-	 * New in V0.2.1
-	 * 
 	 * The image the line detector works on, with NaN, +Infinity and -Infinity set
 	 * to 0. Such values occur only in 32-bit channels, e.g. 0/0 and x/0 after
 	 * Divide by Background on an empty background. Since the detector's smoothing
@@ -142,7 +140,7 @@ public class RidgeSegmenter {
 		return out;
 	}
 
-	/** New in V0.2.1: true if a voxel is NaN, +Infinity or -Infinity. Only 32-bit images can hold such values, so other
+	/** True if a voxel is NaN, +Infinity or -Infinity. Only 32-bit images can hold such values, so other
 	 *  images return false without reading their voxels; a 32-bit image is read only up to the first such voxel. */
 	static boolean hasNonFinite(ImagePlus imp) {
 		if (imp.getBitDepth() != 32) return false;
@@ -201,7 +199,7 @@ public class RidgeSegmenter {
 		});
 
 		/*
-		 * New V0.2.1: the z method. On a single plane all three methods are the same,
+		 * The z method. On a single plane all three methods are the same,
 		 * so a single plane always takes the classic path (with the clean-up rules).
 		 */
 		int[][] perVoxel;
@@ -212,7 +210,7 @@ public class RidgeSegmenter {
 			nLines = o.nLines;
 			failedPlanes = o.failedPlanes;
 		} else {
-			int[] nl = new int[2]; // [0] lines detected, [1] planes on which the detector failed (New in V0.2.1)
+			int[] nl = new int[2]; // [0] lines detected, [1] planes on which the detector failed
 			perVoxel = classic(channelImp, rs, progress, watchdog, nl);
 			nLines = nl[0];
 			failedPlanes = nl[1];
@@ -224,7 +222,8 @@ public class RidgeSegmenter {
 
 	/**
 	 * Classic 2D (all planes): Steger per plane, every line painted in its plane, lines of neighbouring planes joined where
-	 * they share pixels. New V0.2.1:
+	 * they share pixels.
+	 * Details:
 	 *  - the clean-up rules run per plane (RidgeCleanup); the pairs they keep apart are never joined, and the joins through z
 	 *    are made best first (largest overlap first), since the order matters once some joins are refused;
 	 *  - last, short pieces next to a filament are joined to it or dropped (step 6, RidgeShortPieces);
@@ -436,7 +435,7 @@ public class RidgeSegmenter {
 	
 	/** Steger on one plane, timed by the watchdog */
 	static Lines detectPlane(ImageProcessor ip, RidgeSettings rs, double minLength, OverlapOption overlap, SlowWatchdog watchdog) {
-		LineDetector det = new LineDetector().setLineWidth(rs.lineWidth);	// New V0.2.1: the resolver gets the user's width
+		LineDetector det = new LineDetector().setLineWidth(rs.lineWidth);	// The resolver gets the user's width
 		watchdog.arm();						// start the clock for THIS plane
 		try {
 			return det.detectLines(ip, rs.sigma, rs.upperThreshold, rs.lowerThreshold, minLength, rs.maxLength, rs.darkLine,
@@ -446,7 +445,7 @@ public class RidgeSegmenter {
 		}
 	}
 
-	/** Steger's minimum length per plane, in px: the user's minimum applies to the finished object (New V0.2.1). */
+	/** Steger's minimum length per plane, in px: the user's minimum applies to the finished object. */
 	static final double MIN_PIECE = 2;
 
 	/** the safety cap on lines per plane (see LINE_CAP_DIVISOR) */
@@ -525,7 +524,6 @@ public class RidgeSegmenter {
 	 * counts PAINTED voxels, not line indices (see numbered()).
 	 *
 	 * @param L             the line as rows {x, y, response} or, with estimated widths, {x, y, response, width left, width right}
-	 *                      (New V0.2.1: rows instead of the Line object, so a line the kink rule cut keeps its widths)
 	 * @param lab           the plane's label array [y*W + x] to paint into; 0 = background
 	 * @param W, H          plane dimensions, for bounds checking and indexing
 	 * @param id            the local (per-plane) label to write for this line

@@ -31,7 +31,7 @@ import ij.process.ImageProcessor;
 public class CiliaQPrepStatistics {
 
 	/**
-	 * New in V0.2.1: the signal range of a channel (p99.9 - median; median - p0.1 for dark lines), from which ridge
+	 * The signal range of a channel (p99.9 - median; median - p0.1 for dark lines), from which ridge
 	 * detection and the ridge seeds derive their thresholds.
 	 *
 	 * Why tiles: measured on the WHOLE stack on example images, one bright artefact (dust, debris) moved the range
@@ -153,7 +153,7 @@ public class CiliaQPrepStatistics {
 								hist [t1][bin]++;
 								if(shifted)	hist [t2][bin]++;
 							}else if(pass == 0){
-								if(v != v){	// New in V0.2.1: NaN (e.g. 0/0 after Divide by Background) is left out, counted per tile
+								if(v != v){	// NaN (e.g. 0/0 after Divide by Background) is left out, counted per tile
 									nan [0]++;
 									nan [t1]++;
 									if(shifted)	nan [t2]++;
@@ -163,7 +163,7 @@ public class CiliaQPrepStatistics {
 									if(shifted)	er.count(t2, v);
 								}
 							}else{
-								if(v == v){	// New in V0.2.1: NaN left out, as in pass 0
+								if(v == v){	// NaN left out, as in pass 0
 									er.refine(0, v);
 									er.refine(t1, v);
 									if(shifted)	er.refine(t2, v);

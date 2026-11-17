@@ -26,7 +26,9 @@ import ij.process.FloatProcessor;
 import ij.process.ImageProcessor;
 
 /**
- * CiliaQ Preparator - RIDGE DETECTION in z-stacks: the "2D in-focus plane" and "3D" z methods (v0.2.1).
+ * CiliaQ Preparator - RIDGE DETECTION in z-stacks: the "2D in-focus plane" and "3D" z methods.
+ *
+ * Added in CiliaQ Preparator v0.2.1.
  *
  * Classic ridge detection (RidgeSegmenter) paints every plane a line is found in and joins lines of neighbouring
  * planes that share a pixel; out-of-focus planes are painted too, and filaments crossing at different depths fuse.
@@ -160,7 +162,7 @@ public final class RidgeZ {
 			} catch (IllegalStateException overCap) {
 				throw overCap; // the safety cap is fatal for the whole channel
 			} catch (Throwable e) { // any other failure on one plane must not lose the others: the plane counts as empty
-				if (e instanceof ThreadDeath) // New in V0.2.1: a stopped thread (Abort Macro, the Script Editor's Kill) ends the run
+				if (e instanceof ThreadDeath) // A stopped thread (Abort Macro, the Script Editor's Kill) ends the run
 					throw (ThreadDeath) e;
 				progress.notifyMessage("Ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
 						ProgressReporter.ERROR);

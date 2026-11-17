@@ -12,7 +12,7 @@ package ciliaQ_Prep_jnh;
 * GNU General Public License for more details.
 * 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 12, 2026)
+* Date: September 29, 2019 (This Version: November 16, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -157,6 +157,10 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	
 	boolean separateTimesteps [] = new boolean [] {false, false, false};
 	
+	// New in V0.2.1: auto thresholds from the full 16-bit histogram:
+	boolean histogram16bit [] = new boolean [] {false, false, false};
+	String lastFallbackNote = null;	// For the last "no threshold on the full 16-bit histogram" note, once per channel and image
+	
 	//New methods in v0.2.1:
 	public static final String RIDGE_DETECTION = "RIDGE DETECTION (filaments)";
 	public static final String SPOT_DETECTION = "SPOT DETECTION (LoG/DoG)";
@@ -186,8 +190,14 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	String chosenOutputName = outputVariant[0];
 	
 	static final String[] intensityVariant = {"Keep intensities above threshold (creates a background-removed image)",
-			"Set intensities above thresholds to maximum possible intensity value (creates a binary image)"};
+			"Set intensities above thresholds to maximum possible intensity value (creates a binary image)",
+			"Set intensities above thresholds to max unless 0 after preprocessing (creates a binary image)"};	// New in V0.2.1
 	boolean keepIntensities = false;
+	
+	/**	New in V0.2.1: the third segmentation style: binary, and a voxel that is 0 or NaN after preprocessing stays
+	 *	background whatever the threshold (staysBackground). */
+	boolean zeroStaysBackground = false;
+
 	String chosenImageStyle = intensityVariant[0];
 	
 	static final String[] nrFormats = {"US (0.00...)", "Germany (0,00...)"};
@@ -805,6 +815,7 @@ public void run(String arg) {
 				Arrays.fill(zeroIntensityVoxelCount, 0L);
 			}
 			currentChannelIndex = -1;
+			lastFallbackNote = null;
 			
 			if(pendingRidgeLabels != null) {
 				Arrays.fill(pendingRidgeLabels, null);
@@ -863,6 +874,15 @@ public void run(String arg) {
 		   			if(additionalBlur [c]) {
 		   				progress.updateBarText("Blur " + channelIDs [c] + " ...");
 		   				tempImp = blurGaussian(tempImp, additionalBlurRadius [c]);
+		   			}
+		   			
+		   			// New in V0.2.1: Optional use of a 16-bit and not 8-bit histogram
+		   			if(histogram16bit [c] && (tempImp.getBitDepth() != 16 || !usesAutoThresholds(chosenAlgorithms [c]))){
+		   				String h16 = "the full 16-bit histogram is selected, but " + (tempImp.getBitDepth() != 16
+		   						? "the channel is " + tempImp.getBitDepth() + "-bit after preprocessing, so the usual histogram is used"
+		   						: chosenAlgorithms [c] + " computes no automatic threshold from a histogram, so it has no effect");
+		   				progress.notifyMessage("Channel " + channelIDs [c] + ": " + h16, ProgressReporter.NOTIFICATION);
+		   				tp1.append("	NOTE	Channel " + channelIDs [c] + ": " + h16);
 		   			}
 		   			
 		   			if(keepAwake) {
@@ -1194,7 +1214,9 @@ public void run(String arg) {
 		   	 * One promotion for all ridge channels, then write every stashed label set. Deferred to
 		   	 * here so a promotion cannot disturb another channel's segmentation or display state.
 		   	 */
+		   	currentChannelIndex = -1;	// New in V0.2.1: after the channel loop, no channel's switches apply
 		   	procImp = finishPendingLabels(procImp, progress, tp1);
+
 			if(pendingRidgeLabels != null) {
 				Arrays.fill(pendingRidgeLabels, null);
 			}
@@ -1600,9 +1622,17 @@ private boolean importSettings() {
 						chosenImageStyle = intensityVariant [i];
 					}
 				}
+				
 				if(chosenImageStyle.equals(intensityVariant [0])){
+					// If keep intensity in foreground pixels selected
 					keepIntensities = true;
 				}
+				
+				if(chosenImageStyle.equals(intensityVariant [2])){
+					// New in V0.2.1: True if zero or NaN voxels post processing selected to be always background
+					zeroStaysBackground = true;					
+				}
+
 				logImport("Segmentation style = " + chosenImageStyle);
 			}
 			
@@ -1715,6 +1745,10 @@ private boolean importSettings() {
 				if(line.contains("Every time step separately segmented.")) {
 					separateTimesteps [actualC]= true;
 					logImport("C" + actualC + ": time steps separately");
+				}
+				if(line.contains("Automatic thresholds from the full 16-bit histogram")) {
+					histogram16bit [actualC] = true;
+					logImport("C" + actualC + ": full 16-bit histogram");
 				}
 				if(line.contains("Stack processing:")){	// New V0.2.1: methods whose block precedes this line (EXPANSION, FRACTION)
 					String sm = matchStackMethod(line);
@@ -1996,7 +2030,7 @@ private boolean importSettings() {
 						es.customSeedThr = blockDouble(kv, "High core seed - manually selected seed threshold",
 								es.customSeedThr);
 						es.spotDiameter = blockDouble(kv, "Spot seed - expected diameter", es.spotDiameter);
-						es.spotSensitivity = blockDouble(kv, "Spot seed - sensitivity", es.spotSensitivity);
+						es.spotSensitivity = blockDouble(kv, "Spot seed - minimum contrast", es.spotSensitivity);
 						logImport("C" + actualC + ": expansion seeds=" + es.seedSource + " low="
 								+ es.lowThrAlgorithm + " minPiece=" + es.minPieceSize
 								+ (es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE)
@@ -2010,14 +2044,14 @@ private boolean importSettings() {
 						ciliaQ_Prep_jnh.spot_detection.SpotSettings ss = spotSettings [actualC];
 						ss.diameter = blockDouble(kv, "Expected object diameter", ss.diameter);
 						ss.variation = blockDouble(kv, "Diameter variation", ss.variation);
-						ss.sensitivity = blockDouble(kv, "Sensitivity", ss.sensitivity);
+						ss.sensitivity = blockDouble(kv, "Minimum spot contrast", ss.sensitivity);
 						ss.scaleRatio = blockDouble(kv, "Scale ratio", ss.scaleRatio);
-						ss.autoMinIntensity = blockBoolean(kv, "Auto minimum spot intensity", true);
+						ss.autoMinIntensity = blockBoolean(kv, "Auto minimum spot intensity", ss.autoMinIntensity);
 						if(!ss.autoMinIntensity){
 							ss.minIntensity = blockDouble(kv, "Minimum spot intensity", ss.minIntensity);
 						}
 						logImport("C" + actualC + ": spot d=" + ss.diameter + " var=" + ss.variation
-								+ " sens=" + ss.sensitivity + " autoMin=" + ss.autoMinIntensity);
+								+ " min-contrast=" + ss.sensitivity + " autoMin=" + ss.autoMinIntensity);
 					}else{
 						/*	Previously an unrecognised method line fell through in silence and the
 						 *	channel kept whatever chosenAlgorithms happened to hold. Loading a file
@@ -2500,6 +2534,8 @@ private void initChannelArrays(int n){
 	customThr = new double [n];
 	chosenStackMethods = new String [n];		Arrays.fill(chosenStackMethods, STACK_MIP);
 	separateTimesteps = new boolean [n];		Arrays.fill(separateTimesteps, false);
+	histogram16bit = new boolean [n];			Arrays.fill(histogram16bit, false);
+
 	
 	cannySettings = new ProcessSettings [n];
 	
@@ -2557,13 +2593,20 @@ private boolean enterSettings() {
 			+ " pressing OK (exceptions: plain threshold algorithms & 'CUSTOM threshold').", INSTRUCTIONS_FONT);	
 	gd.setInsets(0,0,0);	gd.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
 	gd.setInsets(0,0,0);	gd.addChoice("Stack handling (not used by CANNY, PHANSALKAR, RIDGE, SPOT): ", stackMethod, chosenStackMethods[0]);	
-	gd.setInsets(0,0,0);	gd.addCheckbox("Threshold every time step independently (not used by CANNY, PHANSALKAR)", separateTimesteps [0]);		
+	gd.setInsets(0,0,0);	gd.addCheckbox("Threshold every time step independently (not used by CANNY, PHANSALKAR)", separateTimesteps [0]);
+
+	// New in V0.2.1
+	gd.setInsets(5,0,0);
+	gd.addCheckbox("Automatic threshold from the full 16-bit histogram (advanced, not used by CANNY)", histogram16bit [0]);
+	gd.setInsets(0,0,0);
+	gd.addMessage("(16-bit images, automatic methods only. Slow: Huang (about a minute per plane), Intermodes, Minimum)", INSTRUCTIONS_FONT);
 	
-	gd.setInsets(10,0,0);	gd.addNumericField("Segment more channels (e.g., basal body channel):", 0, 0);
-	gd.setInsets(0,0,0);	gd.addMessage("(Indicate how many more channels you aim to segment -> more dialogs will appear next to enter settings for them)",
-			INSTRUCTIONS_FONT);
+	gd.setInsets(5,0,0);
+	gd.addNumericField("Segment more channels (e.g., basal body channel):", 0, 0);
+	gd.setInsets(0,0,0);
+	gd.addMessage("(Indicate how many more channels you aim to segment -> more dialogs will appear next to enter settings for them)", INSTRUCTIONS_FONT);
 	
-	gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HEADING_FONT);	
+	gd.setInsets(5,0,0);	gd.addMessage("GENERAL SETTINGS:", HEADING_FONT);	
 	gd.setInsets(5,0,0);	gd.addChoice("Segmentation style: ", intensityVariant, intensityVariant [0]);
 			
 	gd.showDialog();
@@ -2588,13 +2631,17 @@ private boolean enterSettings() {
 		double customThrTemp = gd.getNextNumber();
 		String chosenStackMethodsTemp = gd.getNextChoice();
 		boolean separateTimestepsTemp = gd.getNextBoolean();
-
+		boolean histogram16bitTemp = gd.getNextBoolean();
 		nChannels = nChannels + (int) gd.getNextNumber();
 		
 		chosenImageStyle = gd.getNextChoice();
 		if(chosenImageStyle.equals(intensityVariant [0])){
 			keepIntensities = true;
 		}
+		if(chosenImageStyle.equals(intensityVariant [2])){
+			// New in V0.2.1
+			zeroStaysBackground = true;
+		}	
 		
 		// Introduced for init in Version V0.2.0
 		initChannelArrays(nChannels);
@@ -2615,6 +2662,7 @@ private boolean enterSettings() {
 		customThr [0] = customThrTemp;
 		chosenStackMethods [0] = chosenStackMethodsTemp;
 		separateTimesteps [0] = separateTimestepsTemp;
+		histogram16bit [0] = histogram16bitTemp;
 	}
 	System.gc();
 	
@@ -2644,8 +2692,14 @@ private boolean enterSettings() {
 		gd2.setInsets(0,0,0);	gd2.addMessage("Most methods open a second dialog for their own settings after"
 				+ " pressing OK (exceptions: plain threshold algorithms & 'CUSTOM threshold').", INSTRUCTIONS_FONT);	
 		gd2.setInsets(0,0,0);	gd2.addNumericField("If 'CUSTOM threshold' was selected, specify threshold here", customThr[0], 2);
-		gd2.setInsets(0,10,0);	gd2.addChoice("Stack handling (not used by CANNY, PHANSALKAR, RIDGE, SPOT): ", stackMethod, chosenStackMethods[0]);	
-		gd2.setInsets(0,10,0);	gd2.addCheckbox("Threshold every time step independently (not used by CANNY, PHANSALKAR)", separateTimesteps [0]);		
+		gd2.setInsets(0,0,0);	gd2.addChoice("Stack handling (not used by CANNY, PHANSALKAR, RIDGE, SPOT): ", stackMethod, chosenStackMethods[0]);	
+		gd2.setInsets(0,0,0);	gd2.addCheckbox("Threshold every time step independently (not used by CANNY, PHANSALKAR)", separateTimesteps [0]);
+		
+		gd2.setInsets(5,0,0);
+		gd2.addCheckbox("Automatic threshold from the full 16-bit histogram (advanced, not used by CANNY)", histogram16bit [0]);
+		gd2.setInsets(0,0,0);
+		gd2.addMessage("(16-bit images, automatic methods only. Slow: Huang (about a minute per plane), Intermodes, Minimum)", INSTRUCTIONS_FONT);
+		
 		gd2.showDialog();
 
 		//read and process variables--------------------------------------------------
@@ -2665,7 +2719,7 @@ private boolean enterSettings() {
 		customThr [c] = gd2.getNextNumber();
 		chosenStackMethods [c] = gd2.getNextChoice();
 		separateTimesteps [c] = gd2.getNextBoolean();
-		
+		histogram16bit [c] = gd2.getNextBoolean();		
 		//read and process variables--------------------------------------------------
 		if (gd2.wasCanceled()) return false;
 	}	
@@ -2872,7 +2926,7 @@ private boolean validateSettings(){
 		}
 	}
 
-	if(chosenImageStyle.equals(intensityVariant[1])){
+	if(chosenImageStyle.equals(intensityVariant[1]) || chosenImageStyle.equals(intensityVariant[2])){
 		warn("Binary output: Fine for measuring intensity values in non-segmented channels,\nbut intensity values that CiliaQ derives from the segmented channels will be meaningless.",
 			"Segmentation style is set to produce a BINARY image. CiliaQ can still reconstruct"
 			+ "\ncilia from it and this option can be helpful if you have 0 background pixel values."
@@ -3111,8 +3165,23 @@ private boolean readSettingsFromMacroString(String options){
 
 	// Route B: per-channel settings come from the option string itself.
 	selectedSettingsVariant = settingsMethod[0];
-	chosenImageStyle = macroChoice(options, "segmentation-style", intensityVariant, intensityVariant[0]);
+	
+	/*	New in V0.2.1: every text that named the old binary style before (it occurs in that style's name, ignoring case,
+	 *	but not in the keep-intensities style's) keeps meaning it, although it may now occur in the third style's name
+	 *	too ("binary", "max", "creates a binary image"); the third style needs its own words ("unless 0") or its name. */
+	String styleValue = macroValue(options, "segmentation-style");
+	String styleText = styleValue == null ? null : styleValue.replace("[", "").replace("]", "").trim().toLowerCase(Locale.ROOT);
+	if(styleText != null && !styleText.isEmpty() && !intensityVariant[2].toLowerCase(Locale.ROOT).equals(styleText)
+			&& intensityVariant[1].toLowerCase(Locale.ROOT).contains(styleText)
+			&& !intensityVariant[0].toLowerCase(Locale.ROOT).contains(styleText)){
+		chosenImageStyle = intensityVariant[1];	// the old binary style
+	}else{
+		chosenImageStyle = macroChoice(options, "segmentation-style", intensityVariant, intensityVariant[0]);
+	}
+	
 	keepIntensities = chosenImageStyle.equals(intensityVariant[0]);
+	zeroStaysBackground = chosenImageStyle.equals(intensityVariant[2]);
+
 
 	nChannels = macroInt(options, "channels", 1);
 	if(nChannels < 1){
@@ -3162,6 +3231,7 @@ private boolean readSettingsFromMacroString(String options){
 		customThr [c] = macroDouble(options, p + "custom-thr", customThr [c]);
 		chosenStackMethods [c] = macroChoice(options, p + "stack", stackMethod, chosenStackMethods [c]);
 		separateTimesteps [c] = macroFlag(options, p + "separate-timesteps");
+		histogram16bit [c] = macroFlag(options, p + "16-bit-histogram");
 
 		if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
 			chosenLowAlg [c] = macroChoice(options, p + "hyst-low", hystAlgorithms, chosenLowAlg [c]);
@@ -3211,13 +3281,13 @@ private boolean readSettingsFromMacroString(String options){
 					macroDouble(options, p + "exp-min-piece", expansionSettings [c].minPieceSize));
 			readRidgeMacro(options, p + "exp-ridge-", expansionSettings [c].ridge);	// Every ridge key, prefixed exp-
 			expansionSettings [c].spotDiameter = macroDouble(options, p + "exp-spot-diameter", expansionSettings [c].spotDiameter);
-			expansionSettings [c].spotSensitivity = macroDouble(options, p + "exp-spot-sensitivity", expansionSettings [c].spotSensitivity);
+			expansionSettings [c].spotSensitivity = macroDouble(options, p + "exp-spot-contrast", expansionSettings [c].spotSensitivity);
 		}else if(chosenAlgorithms [c].equals(SPOT_DETECTION)){
 			/* min-intensity accepts the literal word 'auto', which is what createRecordString writes. */
 			spotSettings [c] = ciliaQ_Prep_jnh.spot_detection.SpotSettings.initDefault();
 			spotSettings [c].diameter = macroDouble(options, p + "spot-diameter", spotSettings [c].diameter);
 			spotSettings [c].variation = macroDouble(options, p + "spot-variation", spotSettings [c].variation);
-			spotSettings [c].sensitivity = macroDouble(options, p + "spot-sensitivity", spotSettings [c].sensitivity);
+			spotSettings [c].sensitivity = macroDouble(options, p + "spot-contrast", spotSettings [c].sensitivity);
 			spotSettings [c].scaleRatio = macroDouble(options, p + "spot-ratio", spotSettings [c].scaleRatio);
 			String minTxt = macroValue(options, p + "spot-min-intensity");
 			if(minTxt == null || minTxt.length() == 0 || minTxt.equalsIgnoreCase("auto")){
@@ -3420,12 +3490,12 @@ private boolean readSettingsFromMacroString(String options){
 					s += p + "exp-seed-thr=" + Numbers.exact(expansionSettings [c].customSeedThr, 6) + " ";
 			}else{
 				s += p + "exp-spot-diameter=" + Numbers.exact(expansionSettings [c].spotDiameter, 3) + " ";
-				s += p + "exp-spot-sensitivity=" + Numbers.exact(expansionSettings [c].spotSensitivity, 6) + " ";
+				s += p + "exp-spot-contrast=" + Numbers.exact(expansionSettings [c].spotSensitivity, 6) + " ";
 			}
 		}else if(chosenAlgorithms [c].equals(SPOT_DETECTION)){
 			s += p + "spot-diameter=" + Numbers.exact(spotSettings [c].diameter, 3) + " ";
 			s += p + "spot-variation=" + Numbers.exact(spotSettings [c].variation, 3) + " ";
-			s += p + "spot-sensitivity=" + Numbers.exact(spotSettings [c].sensitivity, 6) + " ";
+			s += p + "spot-contrast=" + Numbers.exact(spotSettings [c].sensitivity, 6) + " ";
 			s += p + "spot-ratio=" + Numbers.exact(spotSettings [c].scaleRatio, 3) + " ";
 			s += p + "spot-min-intensity=" + (spotSettings [c].autoMinIntensity
 					? "auto" : Numbers.exact(spotSettings [c].minIntensity, 6)) + " ";
@@ -3444,6 +3514,7 @@ private boolean readSettingsFromMacroString(String options){
 
 			s += p + "stack=[" + chosenStackMethods [c] + "] ";
 			if(separateTimesteps [c])	s += p + "separate-timesteps ";
+			if(histogram16bit [c])	s += p + "16-bit-histogram ";
 		}
 	}
 	return s;	// trailing space is harmless: macro options are space-separated
@@ -3782,7 +3853,7 @@ private void segmentImageWithSurface(ImagePlus imp, float [] surface, int surfac
 		for(int y = 0; y < imp.getHeight(); y++){
 			double threshold = surface == null ? scalarThreshold : surface [y * surfaceWidth + x];
 			double pxintensity = impTemp.getStack().getVoxel(x,y,zTemp);
-			if(pxintensity < threshold || (strict && pxintensity == threshold)){
+			if(pxintensity < threshold || (strict && pxintensity == threshold) || staysBackground(pxintensity)){
 				imp.getStack().setVoxel( x, y, z, 0.0);
 			}else{
 				countSegmentedVoxel(imp, x, y, z);		// zero-intensity loss warning
@@ -4153,6 +4224,16 @@ private void segmentUsingSpotDetection(ImagePlus channelImp, ProgressReporter pr
 		tp1.append("	NOTE	" + vNote);
 	}
 	
+	// Does the minimum spot contrast fit the channel? It is in pixel intensities, so it depends on the bit depth.
+	// writeImp still has the input's bit depth here: label channels promote it only after the channel loop.
+	ij.process.StackStatistics spotStats = new ij.process.StackStatistics(channelImp);
+	String cNote = ciliaQ_Prep_jnh.spot_detection.SpotSettings.contrastNote(ss.sensitivity, writeImp.getBitDepth(),
+			spotStats.min, spotStats.max, channelImp.getBitDepth() == 32);
+	if(cNote != null){
+		progress.notifyMessage("Channel " + channelWriteImp + ": " + cNote, ProgressReporter.NOTIFICATION);
+		tp1.append("	NOTE	" + cNote);
+	}
+	
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1.0;
 	int totalSpots = 0, totalRejected = 0;
 	for(int t = 0; t < channelImp.getNFrames(); t++){
@@ -4179,7 +4260,7 @@ private void segmentUsingSpotDetection(ImagePlus channelImp, ProgressReporter pr
 	tp1.append("	Spots rejected by minimum intensity	" + totalRejected);
 	if(totalSpots == 0){
 		progress.notifyMessage("Channel " + channelWriteImp + ": spot detection found NO spots."
-				+ " Lower the sensitivity, or check that the channel carries punctate signal.",
+				+ " Lower the minimum spot contrast, or check that the channel carries punctate signal.",
 				ProgressReporter.NOTIFICATION);
 	}
 }
@@ -4399,6 +4480,14 @@ private ImagePlus expandFromSeeds(ImagePlus channelImp, ImagePlus origImp, boole
 		if(vNote != null){
 			progress.notifyMessage("Channel " + channelWriteImp + ": spot seeds: " + vNote, ProgressReporter.NOTIFICATION);
 			tp1.append("	NOTE	spot seeds: " + vNote);
+		}
+		// Does the seeds' minimum contrast fit the channel? Once per channel, as for spot detection.
+		ij.process.StackStatistics seedStats = new ij.process.StackStatistics(channelImp);
+		String cNote = ciliaQ_Prep_jnh.spot_detection.SpotSettings.contrastNote(es.spotSensitivity, writeImp.getBitDepth(),
+				seedStats.min, seedStats.max, channelImp.getBitDepth() == 32);
+		if(cNote != null){
+			progress.notifyMessage("Channel " + channelWriteImp + ": spot seeds: " + cNote, ProgressReporter.NOTIFICATION);
+			tp1.append("	NOTE	spot seeds: " + cNote);
 		}
 	}
 
@@ -4837,7 +4926,7 @@ private static String mcib3dVersion(){
  * */
 private void segmentUsingCanny3D(ImagePlus channelImp, ProgressReporter progress, ProcessSettings settings, ImagePlus writeImp, int channelWriteImp){
 	ImagePlus selectedImp;
-	int indexSelected, indexWriteImp;
+	int indexSelected, indexWriteImp, indexChannelImp;
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
 	for(int t = 0; t < channelImp.getNFrames(); t++){
 		if(keepAwake) {
@@ -4869,13 +4958,16 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressReporter progress
 			}
 			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
 			indexWriteImp = writeImp.getStackIndex(channelWriteImp, s+1, t+1)-1;
+			indexChannelImp = channelImp.getStackIndex(1, s+1, t+1)-1;
 			for(int x = 0; x < selectedImp.getWidth(); x++){
 				for(int y = 0; y < selectedImp.getHeight(); y++){
-					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
+					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0
+							|| staysBackground(channelImp, x, y, indexChannelImp)){
 						writeImp.getStack().setVoxel(x, y, indexWriteImp, 0.0);
 					}else{
 						/*	New V0.2.1: counted here so that the zero-intensity loss warning
 						 *	fires for CANNY 3D. */
+
 						countSegmentedVoxel(writeImp, x, y, indexWriteImp);
 						if(!keepIntensities){
 							writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
@@ -4897,7 +4989,7 @@ private void segmentUsingCanny3D(ImagePlus channelImp, ProgressReporter progress
  * */
 private void segmentUsingHysteresis(ImagePlus channelImp, ProgressReporter progress, double thresholds [][], ImagePlus writeImp, int channelWriteImp){
 	ImagePlus selectedImp;
-	int indexSelected, indexWriteImp;
+	int indexSelected, indexWriteImp, indexChannelImp;
 	double maxValue = Math.pow(2.0, writeImp.getBitDepth()) - 1;
 	for(int t = 0; t < channelImp.getNFrames(); t++){
 		if(keepAwake) {
@@ -4931,13 +5023,16 @@ private void segmentUsingHysteresis(ImagePlus channelImp, ProgressReporter progr
 			}
 			indexSelected = selectedImp.getStackIndex(1, s+1, 1)-1;
 			indexWriteImp = writeImp.getStackIndex(channelWriteImp, s+1, t+1)-1;
+			indexChannelImp = channelImp.getStackIndex(1, s+1, t+1)-1;
 			for(int x = 0; x < selectedImp.getWidth(); x++){
 				for(int y = 0; y < selectedImp.getHeight(); y++){
-					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0){
+					if(selectedImp.getStack().getVoxel(x, y, indexSelected) == 0.0
+							|| staysBackground(channelImp, x, y, indexChannelImp)){
 						writeImp.getStack().setVoxel(x, y, indexWriteImp, 0.0);
 					}else{
 						/*	New V0.2.1: counted here so that the zero-intensity loss warning
 						 *	fires for HYSTERESIS. */
+
 						countSegmentedVoxel(writeImp, x, y, indexWriteImp);
 						if(!keepIntensities){
 							writeImp.getStack().setVoxel(x, y, indexWriteImp, maxValue);
@@ -5126,19 +5221,41 @@ private ImagePlus maximumProjection(ImagePlus imp, int startSlice, int endSlice)
 }
 
 /**
- * @return the auto-threshold (its lower bound) of the slice image <s> of <imp> by the method <chosenAlg>, for bright
- * objects on a dark background
- * range: 1 <= s <= stacksize
- * */
+ * The auto-threshold (its lower bound) of slice s of imp by the method chosenAlg,
+ * for bright objects on a dark background.
+ * 
+ * New in V0.2.1:
+ * Normally ImageJ sorts a 16-bit slice into 256 bins between its minimum and maximum. With the 16-bit histogram option
+ * on, a 16-bit slice uses all 65536 bins instead, one per intensity. Since a single bright pixel stretches the 256 bins,
+ * e.g. a saturated pixel at 65535 on a channel mostly below 2000, each bin then spans about 256 intensities, and the
+ * threshold can only move in steps of 256. The full histogram places it at any intensity, so faint objects are not
+ * lost to a coarse step.
+ * 
+ * If the method fails on the full histogram, the usual 256 bins are used and the user is notified.
+ *
+ * @param imp		the channel
+ * @param s			the slice, 1 <= s <= stack size
+ * @param chosenAlg	an ImageJ auto-threshold method, e.g. "Otsu"
+ * @return the lower threshold, in the slice's pixel intensities
+ */
 private double getSingleSliceImageThreshold (ImagePlus imp, int s, String chosenAlg){
 	//calculate thresholds	
 	imp.setSlice(s);
 	imp.getProcessor().setSliceNumber(s);
-	imp.getProcessor().setAutoThreshold(Method.valueOf(Method.class, chosenAlg), true);
+	if(useFull16BitHistogram(imp) && full16BitWorks(imp, chosenAlg, s, false)){
+		/*	New in V0.2.1: with the 16-bit histogram option, a 16-bit slice is thresholded on all 65536 bins. Intermodes and
+		 *	Minimum smooth the histogram until it has two maxima and give up after 10000 passes, which a sparse 65536-bin
+		 *	histogram often needs (tested: threshold 0, the whole channel foreground). full16BitWorks detects that, and the
+		 *	usual histogram is used instead. */
+		imp.getProcessor().setAutoThreshold(chosenAlg + " dark 16-bit");
+	}else{
+		imp.getProcessor().setAutoThreshold(Method.valueOf(Method.class, chosenAlg), true);
+	}
 	//Before: IJ.setAutoThreshold(imp, (chosenAlg + " dark"));
 	imp.getProcessor().setSliceNumber(s);
 	return imp.getProcessor().getMinThreshold();
 }
+
 
 /**
  * @return a new ImagePlus exlusively containing the selected <timepoint> of the ImagePlus <imp>
@@ -5170,15 +5287,86 @@ private ImagePlus getSelectedTimepoints (ImagePlus imp, int firstTimepoint, int 
 }
 
 /**
- * Calculates a threshold by the method <algorithm> in the histogram of ALL slice images of <imp> (the "stack" option),
- * for bright objects on a dark background
- * @return its lower bound
- * */
+ * The auto-threshold (its lower bound) of all slices of imp together ("stack" histogram) by the method algorithm, for
+ * bright objects on a dark background.
+ *
+ * @param imp		the channel
+ * @param algorithm	an ImageJ auto-threshold method, e.g. "Otsu"
+ * @return the lower threshold, in the channel's pixel intensities
+ */
 private double getHistogramThreshold (ImagePlus imp, String algorithm){
-	//calculate thresholds	
-	IJ.setAutoThreshold(imp, (algorithm +" dark stack"));
-	//TODO Find a way to replace with imp.getProcessor().setAutoThreshold(Method.valueOf(Method.class,algorithm), true);
+	/*	New in V0.2.1: " 16-bit" with the 16-bit histogram option, unless the method fails on it (see full16BitWorks). */
+	boolean full16 = useFull16BitHistogram(imp) && full16BitWorks(imp, algorithm, 1, true);
+	
+	// calculate thresholds	
+	IJ.setAutoThreshold(imp, (algorithm +" dark stack" + (full16 ? " 16-bit" : "")));	// New in V0.2.1: " 16-bit" when chosen
+	// TODO Find a way to replace with imp.getProcessor().setAutoThreshold(Method.valueOf(Method.class,algorithm), true);
 	return imp.getProcessor().getMinThreshold();
+}
+
+/**
+ * New in V0.2.1: Checks whether the automatic threshold of the channel being segmented should use the full 16-bit histogram
+ * (65536 bins, one per intensity) instead of ImageJ's usual 256 bins. True only if the option is on for this channel and the
+ * image is 16-bit:
+ * 	- an 8-bit image already has one bin per intensity, so the option would change nothing;
+ * 	- a 32-bit image has no fixed set of intensities that could each get a bin.
+ */
+private boolean useFull16BitHistogram(ImagePlus imp){
+	return imp.getBitDepth() == 16 && histogram16bit != null && currentChannelIndex >= 0
+			&& currentChannelIndex < histogram16bit.length && histogram16bit [currentChannelIndex];
+}
+
+/**
+ * New in V0.2.1: Checks whether the method finds a threshold on the full 16-bit histogram. Intermodes and Minimum smooth
+ * the histogram until it has two maxima, and give up after 10000 passes. A sparse 65536-bin histogram, with many empty bins
+ * between occupied intensities, often needs more passes, so these methods then fail (tested: threshold 0, so the whole
+ * channel became foreground). The other methods compute their threshold without a pass limit, so they always find one.
+ * On failure the usual 256-bin histogram is used, and the user is notified once per channel and method in each image.
+ * So a sparse channel is still segmented, e.g. Intermodes falls back to the usual histogram instead of marking every
+ * voxel as object.
+ *
+ * @param imp	the channel, 16-bit
+ * @param alg	an ImageJ auto-threshold method
+ * @param slice	the slice, 1 <= slice <= stack size; unused when stack is true
+ * @param stack	true for the histogram of all slices together, as in getHistogramThreshold
+ * @return true if the full histogram gives a threshold
+ */
+private boolean full16BitWorks(ImagePlus imp, String alg, int slice, boolean stack){
+	if(!alg.equals("Intermodes") && !alg.equals("Minimum"))	return true;
+	int [] h = new int [65536];
+	for(int s = stack ? 1 : slice; s <= (stack ? imp.getStackSize() : slice); s++){
+		int [] hs = imp.getStack().getProcessor(s).getHistogram();
+		for(int b = 0; b < hs.length && b < h.length; b++)	h [b] += hs [b];
+	}
+	int lowest = 0;
+	while(lowest < h.length - 1 && h [lowest] == 0)	lowest++;
+	// AutoThresholder reports the failure as 0 (its -1 is mapped to 0): a level at or below the lowest occupied grey level
+	// would make the whole channel foreground, which for these two methods means the search failed
+	if(new ij.process.AutoThresholder().getThreshold(Method.valueOf(Method.class, alg), h) > lowest)	return true;
+	String note = "Channel " + channelIDs [currentChannelIndex] + ": " + alg + " found no threshold on the full 16-bit histogram"
+			+ " (it stops after 10000 smoothing passes), so the usual histogram is used";
+	if(!note.equals(lastFallbackNote)){
+		progress.notifyMessage(note, ProgressReporter.NOTIFICATION);
+		lastFallbackNote = note;
+	}
+	return false;
+}
+
+/**
+ * New in V0.2.1: checks whether the segmentation method computes automatic thresholds from a histogram, so the 16-bit
+ * histogram option can act on it. The settings file writes the option's line only for these methods.
+ * 	- yes: the plain thresholds (e.g. Otsu), HYSTERESIS and EXPANSION;
+ * 	- no: CUSTOM threshold (a fixed value), CANNY 3D (its own edge thresholds), RIDGE DETECTION and SPOT DETECTION
+ * 	  (no histogram threshold), PHANSALKAR (a local threshold from mean and deviation) and the FRACTION methods (a
+ * 	  fraction of the way from background to signal level).
+ * The check is per method, not per setting. HYSTERESIS with both thresholds custom, or EXPANSION with a custom extent and
+ * ridge or spot seeds, counts as yes although no automatic threshold is computed. The option then has no effect, and the
+ * settings file carries a line that changes nothing when read back.
+ */
+static boolean usesAutoThresholds(String alg){
+	return !("CUSTOM threshold".equals(alg) || "CANNY 3D".equals(alg) || RIDGE_DETECTION.equals(alg)
+			|| SPOT_DETECTION.equals(alg) || ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(alg)
+			|| ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(alg));
 }
 
 private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impTemp, int zTemp){
@@ -5187,7 +5375,7 @@ private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impT
 		for(int y = 0; y < imp.getHeight(); y++){
 			double pxintensity = impTemp.getStack().getVoxel(x,y,zTemp);
 			// New in V0.2.1: +Infinity (a part without signal, flatParts) removes NaN voxels too: NaN < threshold is false
-			if(pxintensity < threshold || threshold == Double.POSITIVE_INFINITY){
+			if(pxintensity < threshold || threshold == Double.POSITIVE_INFINITY || staysBackground(pxintensity)){
 				imp.getStack().setVoxel( x, y, z, 0.0);
 			}else{
 				countSegmentedVoxel(imp, x, y, z);		// zero-intensity loss warning
@@ -5197,6 +5385,22 @@ private void segmentImage(ImagePlus imp, double threshold, int z, ImagePlus impT
 			}
 		}
 	}
+}
+
+/**
+ *	New in V0.2.1: the third segmentation style ("... unless 0 after preprocessing"). A voxel that is 0 or undefined
+ *	(NaN) after preprocessing stays background whatever the threshold: e.g. the zero background of a cropped or masked
+ *	image, which a threshold at or below 0 would make foreground, or 0/0 after Divide by Background.
+ *	@param preprocessed	the voxel's value after preprocessing
+ */
+private boolean staysBackground(double preprocessed){
+	return zeroStaysBackground && (preprocessed == 0.0 || preprocessed != preprocessed);
+}
+
+/**	New in V0.2.1: as staysBackground(double), for a voxel of the preprocessed channel (index: 0-based stack index);
+ *	reads the voxel only with the third output image style. */
+private boolean staysBackground(ImagePlus preprocessed, int x, int y, int index){
+	return zeroStaysBackground && staysBackground(preprocessed.getStack().getVoxel(x, y, index));
 }
 
 /**
@@ -5382,7 +5586,12 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 			}else {
 				tp.append("");				
 			}
-		}	
+		}
+		
+		if(histogram16bit [i] && usesAutoThresholds(chosenAlgorithms [i])) {
+			// New in V0.2.1, only where it acts
+			tp.append("		Automatic thresholds from the full 16-bit histogram.");			
+		}
 	}
 	tp.append("");
 }

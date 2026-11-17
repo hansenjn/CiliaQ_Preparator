@@ -127,7 +127,8 @@ public class SpotDetector {
 			// TRAP 1: a NEW MaximumFinder per call. Reusing one caches arrays sized for a previous image.
 			MaximumFinder mf = new MaximumFinder();
 			// TRAP 2: excludeOnEdges = true, or border maxima survive any prominence.
-			java.awt.Polygon pts = mf.getMaxima(fp, st.sensitivity, true);
+			java.awt.Polygon pts = mf.getMaxima(fp, st.prominence(), true);
+			
 			if (pts == null) continue;
 			ImageProcessor raw = channelImp.getStack().getProcessor(z + 1);
 			for (int i = 0; i < pts.npoints; i++) {

@@ -20,7 +20,7 @@ import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
  * These are DERIVED from the simple values plus the channel's intensity statistics (see deriveFrom),
  * and are exposed in an "advanced" section only so an expert can override them.
  *
- * Z-STACKS AND CLEAN-UP (v0.2.1). The z method decides how the lines of the planes become objects: classic 2D
+ * Z-STACKS AND CLEAN-UP. The z method decides how the lines of the planes become objects: classic 2D
  * (every plane a line is found in, joined by overlap), 2D in-focus plane (each detection only in its in-focus plane),
  * or 3D (in-focus plane plus pairing of crossing branches across planes). The clean-up rules (RidgeCleanup) then
  * keep lines apart that belong to different filaments: copy (out-of-focus copies, in-focus and 3D only), kink,
@@ -75,7 +75,7 @@ public class RidgeSettings implements Cloneable {
 	public boolean copyRule = false;		// drop out-of-focus copies (in-focus and 3D only)
 	public double copyRatio = 4.0;			// a copy is dropped when a point this much brighter lies in another plane beside it
 	
-	public boolean kinkRule = false;		// cut lines at sharp bends (v0.2.1)
+	public boolean kinkRule = false;		// cut lines at sharp bends
 	public double kinkAngle = 25.0;			// degrees
 	
 	public boolean branchRule = true;
@@ -224,8 +224,8 @@ public class RidgeSettings implements Cloneable {
 		deriveFromRange(darkLine ? median - lowPercentile : highPercentile - median);
 	}
 
-	/** The derivation for a given signal range (the line contrast at sensitivity 1).
-	 *	Public from V0.2.1: the plugin measures the range in tiles (CiliaQPrepStatistics.SignalRange).
+	/** 
+	 * The derivation for a given signal range (the line contrast at sensitivity 1).
 	 * */
 	public void deriveFromRange(double signalRange) {
 		if (advancedOverride) return;
@@ -295,8 +295,6 @@ public class RidgeSettings implements Cloneable {
 		if (!(upperThreshold > 0.0))
 			return "ridge detection: derived upper threshold is 0 or not a number - increase 'contrast sensitivity' "
 					+ "or check that the channel carries signal";
-		/*	New V0.2.1: only for derived thresholds. With the advanced values overridden, deriveFromRange returns at once, the contrast stays 0
-		 *	and this check refused every such run on a channel with noise (MAD > 0) - Jan's own sperm settings among them. */
 		if (!advancedOverride && madOfChannel > 0.0 && contrastHigh < 2.0 * madOfChannel)
 			return "ridge detection: the line contrast this would look for (" + IJ.d2s(contrastHigh, 2)
 					+ ") is below twice the channel noise level (" + IJ.d2s(2.0 * madOfChannel, 2)

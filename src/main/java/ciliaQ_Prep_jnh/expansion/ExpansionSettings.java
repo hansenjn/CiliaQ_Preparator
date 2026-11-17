@@ -58,7 +58,8 @@ public class ExpansionSettings {
 
 	/** Only used when seedSource is SEED_SPOT. */
 	public double spotDiameter = 5.0;
-	public double spotSensitivity = 500;
+	public double spotSensitivity = ciliaQ_Prep_jnh.spot_detection.SpotSettings.DEFAULT_CONTRAST;
+		//the minimum spot contrast in intensity (was a DoG prominence)
 	
 	/** The wiki page of the seed tool, the target of the dialog's Help button. */
 	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Expansion-from-seeds-in-CiliaQ-Preparator";
@@ -145,7 +146,7 @@ public class ExpansionSettings {
 		gd.setInsets(0, 0, 0);
 		gd.addNumericField("Diameter of spots to seed from (px)", inst.spotDiameter, 2);
 		gd.setInsets(0, 0, 0);
-		gd.addNumericField("Sensitivity for spot seeds (grey levels)", inst.spotSensitivity, 3);
+		gd.addNumericField("Minimum contrast for spot seeds (intensity)", inst.spotSensitivity, 3);
 
 		gd.addHelp(HELP_URL);
 		gd.showDialog();
@@ -199,7 +200,7 @@ public class ExpansionSettings {
 		} else if (seedSource.equals(SEED_SPOT)) {
 			sb.append("		Spot seed - expected diameter (px)	")
 				.append(Numbers.exact(spotDiameter, 2)).append("\n");
-			sb.append("		Spot seed - sensitivity (grey levels)	")
+			sb.append("		Spot seed - minimum contrast (intensity)	")
 				.append(Numbers.exact(spotSensitivity, 3)).append("\n");
 		}
 		return sb.toString();
