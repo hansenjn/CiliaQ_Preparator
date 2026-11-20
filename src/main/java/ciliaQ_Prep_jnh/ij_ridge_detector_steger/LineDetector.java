@@ -201,6 +201,16 @@ public class LineDetector {
 	 *            the junctions
 	 */
 	private void addAdditionalJunctionPointsAndLines(Lines lines, Junctions junctions) {
+		// CiliaQ-MOD: the junctions by pixel, so that the junctions at the same position as a split point are found
+		// without a pass over all later junctions (those passes took minutes on a noise image). Only the junctions
+		// present now can be found: every junction this method adds is marked processed at once, and no position
+		// changes here.
+		final java.util.Map<Long, java.util.List<Integer>> atPixel = new java.util.HashMap<Long, java.util.List<Integer>>();
+		for (int k = 0; k < junctions.size(); k++) {
+			Junction jk = junctions.get(k);
+			atPixel.computeIfAbsent(pixelKey((int) Math.floor(jk.x), (int) Math.floor(jk.y)),
+					key -> new ArrayList<Integer>()).add(k);
+		}
 
 		for (int i = 0; i < junctions.size(); i++) {
 			Junction splitPoint = junctions.get(i); // Split point!
@@ -216,8 +226,9 @@ public class LineDetector {
 				Junctions junctionsWithTheSamePosition = new Junctions(junctions.getFrame());
 				alreadyProcessedJunctionPoints.add(i);
 				junctionsWithTheSamePosition.add(splitPoint);
-				for (int j = i + 1; j < junctions.size(); j++) {
+				for (int j : junctionsNear(atPixel, splitPoint, i)) {
 					if (!alreadyProcessedJunctionPoints.contains(j)) {
+
 						Junction junc2 = junctions.get(j);
 						if (Math.abs(junc2.x - splitPoint.x) < 0.01 && Math.abs(junc2.y - splitPoint.y) < 0.01) {
 							alreadyProcessedJunctionPoints.add(j);
@@ -380,22 +391,25 @@ public class LineDetector {
 					}
 
 					// Update following junctions point
+					// CiliaQ-MOD: the index of the new line looked up once (the lines do not change in this loop), and
+					// the distance to the second line computed only for a junction on the split line: computed for
+					// every junction at every split, both took minutes on a noise image. The results are the same.
+					final int newIndex = lines.getIndexByID(newID);
 					for (int j = 0; j < junctions.size(); j++) {
 						Junction junc2 = junctions.get(j);
 						if (junc2.cont1 == splitPoint.cont1 && junc2.pos > splitPoint.pos) {
 							log("Update From " + junc2.getLine1().getID() + "-" + junc2.getLine2().getID() + " Pos: "
 									+ junc2.pos);
-							junc2.cont1 = lines.getIndexByID(newID);
+							junc2.cont1 = newIndex;
 							junc2.lineCont1 = lNew;
 							junc2.pos = junc2.pos - splitPoint.pos;
 							log("Update To " + junc2.getLine1().getID() + "-" + junc2.getLine2().getID() + " Pos: "
 									+ junc2.pos);
 						}
 
-						double[] min = minDistance(junc2.getLine2(), junc2.x, junc2.y);
-
-						if (junc2.cont2 == splitPoint.cont1 && ((int) min[1]) > splitPoint.pos) {
-							junc2.cont2 = lines.getIndexByID(newID);
+						if (junc2.cont2 == splitPoint.cont1
+								&& ((int) minDistance(junc2.getLine2(), junc2.x, junc2.y)[1]) > splitPoint.pos) {
+							junc2.cont2 = newIndex;
 							junc2.lineCont2 = lNew;
 						}
 
@@ -451,7 +465,10 @@ public class LineDetector {
 		}
 
 		Junctions newJunctions = new Junctions(junctions.getFrame());
-		ArrayList<Point2D.Float> processedJunctions = new ArrayList<Point2D.Float>();
+		java.util.HashSet<Point2D.Float> processedJunctions = new java.util.HashSet<Point2D.Float>();
+		PointGrid grid = new PointGrid(lines);
+		int[] seen = new int[lines.size()];
+		java.util.Arrays.fill(seen, -1);
 		for (int i = 0; i < junctions.size(); i++) {
 			Junction junc = junctions.get(i);
 			Line mainLine = null;
@@ -462,14 +479,14 @@ public class LineDetector {
 			ArrayList<Integer> secondaryLinePos = new ArrayList<Integer>();
 
 			// Verarbeite jede Junction-Position nur einmal.
-			if (!processedJunctions.contains(new Point2D.Float(junc.x, junc.y))) { // processed[(int)junc.x][(int)junc.y]==0
+			if (!processedJunctions.contains(new Point2D.Float(junc.x + 0.0f, junc.y + 0.0f))) { // processed[(int)junc.x][(int)junc.y]==0
 
-				processedJunctions.add(new Point2D.Float(junc.x, junc.y));
+				processedJunctions.add(new Point2D.Float(junc.x + 0.0f, junc.y + 0.0f));
 
 				/*
 				 * Finde die Sekundärlinien und Hauptlinien
 				 */
-				for (int j = 0; j < lines.size(); j++) {
+				for (int j : grid.linesNear(junc.x, junc.y, i, seen)) {
 					Line l = lines.get(j);
 
 					double[] mindist = minDistance(l, junc.x, junc.y);
@@ -562,6 +579,105 @@ public class LineDetector {
 		}
 		return newJunctions;
 
+	}
+
+	/**
+	 * CiliaQ-MOD: the junctions with an index above i in the 3 x 3 pixels around a junction, ascending, the order of a
+	 * pass over the list (see addAdditionalJunctionPointsAndLines). A junction within 0.01 px lies in one of them.
+	 */
+	private static int[] junctionsNear(java.util.Map<Long, java.util.List<Integer>> atPixel, Junction p, int i) {
+		final int cx = (int) Math.floor(p.x), cy = (int) Math.floor(p.y);
+		int[] out = new int[4];
+		int n = 0;
+		for (int dy = -1; dy <= 1; dy++) {
+			for (int dx = -1; dx <= 1; dx++) {
+				java.util.List<Integer> c = atPixel.get(pixelKey(cx + dx, cy + dy));
+				if (c == null)
+					continue;
+				for (int k : c) {
+					if (k <= i)
+						continue;
+					if (n == out.length)
+						out = java.util.Arrays.copyOf(out, 2 * n);
+					out[n++] = k;
+				}
+			}
+		}
+		out = java.util.Arrays.copyOf(out, n);
+		java.util.Arrays.sort(out);
+		return out;
+	}
+
+	/** CiliaQ-MOD: the key of a pixel (x in the high, y in the low 32 bits) */
+	private static long pixelKey(int x, int y) {
+		return ((long) x << 32) | (y & 0xffffffffL);
+	}
+
+	/**
+	 * CiliaQ-MOD: the lines with a point in a pixel, so that fixJunctions looks only at the lines near a junction
+	 * instead of every line (every junction x every line point took over an hour on a noise image). A point within
+	 * 0.1 px of a junction lies in the junction's pixel or one of its 8 neighbours, so these lines are all that
+	 * minDistance can match; returned in ascending order, the order of the full loop, so the result is the same.
+	 */
+	private static class PointGrid {
+		private final int w, h;
+		private final int[] head, next, lineOf;
+
+		PointGrid(Lines lines) {
+			int maxX = 0, maxY = 0, n = 0;
+			for (Line l : lines) {
+				for (int k = 0; k < l.num; k++) {
+					maxX = Math.max(maxX, (int) Math.floor(l.col[k]));
+					maxY = Math.max(maxY, (int) Math.floor(l.row[k]));
+				}
+				n += l.num;
+			}
+			w = maxX + 3; h = maxY + 3;
+			head = new int[w * h];
+			java.util.Arrays.fill(head, -1);
+			next = new int[n];
+			lineOf = new int[n];
+			int p = 0;
+			for (int j = 0; j < lines.size(); j++) {
+				Line l = lines.get(j);
+				for (int k = 0; k < l.num; k++, p++) {
+					int c = cell(l.col[k], l.row[k]);
+					lineOf[p] = j;
+					next[p] = head[c];
+					head[c] = p;
+				}
+			}
+		}
+
+		private int cell(float x, float y) {
+			int cx = Math.max(0, Math.min(w - 1, (int) Math.floor(x) + 1));
+			int cy = Math.max(0, Math.min(h - 1, (int) Math.floor(y) + 1));
+			return cy * w + cx;
+		}
+
+		/** the lines with a point in the 3 x 3 pixels around (x, y), ascending; stamp marks the lines seen for it */
+		int[] linesNear(float x, float y, int stamp, int[] seen) {
+			int cx = Math.max(0, Math.min(w - 1, (int) Math.floor(x) + 1));
+			int cy = Math.max(0, Math.min(h - 1, (int) Math.floor(y) + 1));
+			int[] out = new int[8];
+			int n = 0;
+			for (int dy = -1; dy <= 1; dy++) {
+				for (int dx = -1; dx <= 1; dx++) {
+					int xx = cx + dx, yy = cy + dy;
+					if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+					for (int p = head[yy * w + xx]; p >= 0; p = next[p]) {
+						int j = lineOf[p];
+						if (seen[j] == stamp) continue;
+						seen[j] = stamp;
+						if (n == out.length) out = java.util.Arrays.copyOf(out, 2 * n);
+						out[n++] = j;
+					}
+				}
+			}
+			out = java.util.Arrays.copyOf(out, n);
+			java.util.Arrays.sort(out);
+			return out;
+		}
 	}
 
 	/**
@@ -752,16 +868,36 @@ public class LineDetector {
 		for (Line c : contours) {
 			if ((c.estimateLength() < minLength) || (maxLength > 0 && c.estimateLength() > maxLength)) {
 				log("Removing line " + c.getID() + " of length " + c.estimateLength());
-				deleteJunctions(contours, junctions, c, overlapOption);
 				remove.add(c);
 			} else {
 				log("Keeping line " + c.getID() + " of length " + c.estimateLength());
 			}
 		}
-		for (Line c : remove) {
+		
+		// CiliaQ-MOD: the junctions of all removed lines in one pass, then the lines in one pass. Per removed line, a
+		// pass over every junction and a search of the line in the list took most of the time on a noise image (tens
+		// of thousands of short lines). The same junctions and lines are removed; the others keep their order.
+		deleteJunctions(contours, junctions, remove, overlapOption);
+		final Set<Line> gone = Collections.newSetFromMap(new java.util.IdentityHashMap<Line, Boolean>());
+		gone.addAll(remove);
+		contours.removeIf(gone::contains);
+	}
 
-			contours.remove(c);
-		}
+	/**
+	 * CiliaQ-MOD: deleteJunctions for several lines at once (see pruneContours):
+	 * drop a junction if it belongs to any of them.
+	 */
+	private void deleteJunctions(Lines contours, Junctions junctions, ArrayList<Line> lines, OverlapOption overlapOption) {
+		final Set<Integer> ids = new java.util.HashSet<Integer>();
+		for (Line c : lines)
+			ids.add(c.getID());
+		if (ids.isEmpty())
+			return;
+		if (overlapOption == OverlapOption.SLOPE)
+			junctions.removeIf(j -> ids.contains(j.cont1) || ids.contains(j.cont2));
+		else
+			junctions.removeIf(j -> ids.contains(contours.get(j.cont1).getID())
+					|| ids.contains(contours.get(j.cont2).getID()));
 	}
 
 	/**

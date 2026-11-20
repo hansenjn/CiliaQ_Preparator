@@ -177,7 +177,22 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 		for (int i = 0; i < nE; i++) cl[i] = i;   // start: every end is its own cluster
 		
 		// Compare every pair of ends; if they coincide (within SIGMA), union their clusters.
-		for (int i = 0; i < nE; i++) for (int k = i + 1; k < nE; k++) {
+		//	Only pairs in neighbouring cells of a SIGMA grid can coincide, so only those are compared (all pairs
+		//	took over an hour on a noise image). The roots do not depend on the order of the unions (a root is
+		//	always the smallest index of its cluster), so the clusters are those of the full comparison.
+		final Map<Long, List<Integer>> cells = new java.util.HashMap<Long, List<Integer>>();
+		final long[] cellOf = new long[nE];
+		for (int i = 0; i < nE; i++) {
+			final float[] p = endPoint(eLine.get(i), eSide.get(i));
+			cellOf[i] = cellKey((int) Math.floor(p[0] / SIGMA), (int) Math.floor(p[1] / SIGMA));
+			List<Integer> c = cells.get(cellOf[i]);
+			if (c == null) { c = new ArrayList<Integer>(); cells.put(cellOf[i], c); }
+			c.add(i);
+		}
+		for (int i = 0; i < nE; i++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+			final List<Integer> c = cells.get(cellKey((int) (cellOf[i] >> 32) + dx, (int) cellOf[i] + dy));
+			if (c != null) for (final int k : c) {
+			if (k <= i) continue;
 			if (eLine.get(i) == eLine.get(k)) continue;   // don't merge a line with itself
 			
 			if (intersects(endPoint(eLine.get(i), eSide.get(i)), endPoint(eLine.get(k), eSide.get(k)), SIGMA)) {
@@ -191,6 +206,7 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 				
 				// merge: point the larger root at the smaller (keeps a stable representative)
 				if (a != b) cl[Math.max(a, b)] = Math.min(a, b);
+			}
 			}
 		}
 		
@@ -527,24 +543,43 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 	 */
 	private void pruneJunctions(final Junctions junctions, final Set<Junction> updatedJunctions) {
 		final Map<String, Junction> jMap = new java.util.LinkedHashMap<String, Junction>();	//CILIAQ-MOD for determinability
+		
+		// CiliaQ-MOD: the junctions to remove are collected and removed in one pass (removeFirst), and the set is
+		// compared with the remaining junctions through an identity set: removing them one by one from the list and
+		// retainAll with the list (a search of the list per junction) took minutes on a noise image. Same result.
+		final Set<Junction> remove = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Junction, Boolean>());
 		for (final Junction j : updatedJunctions) {
 			String key = null;
 			// Remove Junctions with references to the same Line
 			if (j.cont1 == j.cont2)
-				junctions.remove(j);
+				remove.add(j);
 			// Remove Junctions of the same two lines at the same x,y point
 			else if (jMap.containsKey((key = getKey(j))))
-				junctions.remove(j);
+				remove.add(j);
 			else {
 				// Keep the junction and register it as "the" definitive junction
 				// for its two lines at this point.
 				jMap.put(key, j);
 			}
 		}
+		removeFirst(junctions, remove);
 
 		// Update the updatedJunctions set by removing all Junction instances
 		// that have been removed from the master Junctions collection.
-		updatedJunctions.retainAll(junctions);
+		final Set<Junction> left = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Junction, Boolean>());
+		left.addAll(junctions);
+		updatedJunctions.removeIf(j -> !left.contains(j));
+	}
+
+	/**
+	 * CiliaQ-MOD: removes the first occurrence of every element of remove from list, in one pass, as list.remove(e)
+	 * for each of them does (Junction has no equals of its own, so remove(e) finds e itself).
+	 */
+	private static void removeFirst(final Junctions list, final Set<Junction> remove) {
+		if (remove.isEmpty())
+			return;
+		final Set<Junction> done = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Junction, Boolean>());
+		list.removeIf(j -> remove.contains(j) && done.add(j));
 	}
 
 	/**
@@ -727,6 +762,11 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 		return points.get(points.size() - 2);
 	}
 
+	/** CiliaQ-MOD: the key of a grid cell (x in the high, y in the low 32 bits) */
+	private static long cellKey(final int x, final int y) {
+		return ((long) x << 32) | (y & 0xffffffffL);
+	}
+	
 	/**
 	 * Intersects.
 	 *

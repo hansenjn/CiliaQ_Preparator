@@ -4,7 +4,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -902,7 +901,7 @@ public final class RidgeZ {
 						}
 			}
 		}
-		links.sort(Comparator.comparingDouble(l -> linkCost(P.get(l[0]), P.get(l[1]))));
+		sortByLinkCost(links);
 		
 		if (coh <= 0) {
 			for (int[] l : links)
@@ -1677,22 +1676,9 @@ public final class RidgeZ {
 			List<float[]> ps = e.getValue();
 			for (int guard = 0; guard < 50; guard++) {
 				int[] comp = pieceOf(out, L, ps);
-				int c0 = comp[0];
-				double best = Double.MAX_VALUE;
-				int bi = -1, bj = -1;
-				for (int i = 0; i < ps.size(); i++)
-					if (comp[i] == c0)
-						for (int j = 0; j < ps.size(); j++)
-							if (comp[j] != c0 && comp[j] >= 0) {
-								float[] p = ps.get(i), q = ps.get(j);
-								double d = Math.pow(p[0] - q[0], 2) + Math.pow(p[1] - q[1], 2)
-										+ Math.pow((p[2] - q[2]) * a, 2);
-								if (d < best) {
-									best = d;
-									bi = i;
-									bj = j;
-								}
-							}
+				double[] bp = closestPair(ps, comp);
+				int bi = (int) bp[0], bj = (int) bp[1];
+				double best = bp[2];
 				if (bi < 0)
 					break;
 				float[] p = ps.get(bi), q = ps.get(bj);
@@ -1702,6 +1688,126 @@ public final class RidgeZ {
 					paintPhys(out, p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1]), p[2] + t * (q[2] - p[2]), r, L,
 							true);
 				}
+			}
+		}
+	}
+
+	/**
+	 * The pair bridge joins next: i with comp[i] == comp[0], j with comp[j] != comp[0] and comp[j] >= 0, at the smallest
+	 * distance (z scaled by a); on a tie the smallest i, then the smallest j. That is the pair the double loop over i and
+	 * j (both ascending, only a smaller distance replaces) finds; here each i asks a k-d tree of the j points instead of
+	 * all of them, since a label of noise with about 100,000 points took hours. The distance is the loop's formula.
+	 *
+	 * @return { i, j, squared distance }; i = -1 if there is no pair
+	 */
+	double[] closestPair(List<float[]> ps, int[] comp) {
+		final int n = ps.size(), c0 = comp[0];
+		int m = 0;
+		for (int j = 0; j < n; j++)
+			if (comp[j] != c0 && comp[j] >= 0)
+				m++;
+		double best = Double.MAX_VALUE;
+		int bi = -1, bj = -1;
+		if (m == 0)
+			return new double[] { -1, -1, best };
+		int[] js = new int[m];
+		m = 0;
+		for (int j = 0; j < n; j++)
+			if (comp[j] != c0 && comp[j] >= 0)
+				js[m++] = j;
+		NearestTree t = new NearestTree(ps, js, a);
+		for (int i = 0; i < n; i++) {
+			if (comp[i] != c0)
+				continue;
+			double[] r = t.nearest(ps.get(i), best); // only a distance below best can replace
+			if (r[0] >= 0) {
+				best = r[1];
+				bi = i;
+				bj = (int) r[0];
+			}
+		}
+		return new double[] { bi, bj, best };
+	}
+
+	/**
+	 * A k-d tree for closestPair: the nearest of some points to a query point, the distance as in bridge
+	 * (dx^2 + dy^2 + (dz * a)^2), on a tie the point with the smallest index. A subtree is left out only when it lies
+	 * farther than the best distance found, by more than a margin of rounding, so the result is exact.
+	 */
+	static final class NearestTree {
+		private static final int LEAF = 8;
+		private static final double MARGIN = 1e-3;
+		private final List<float[]> ps;
+		private final int[] idx; // the points' indices, arranged as the tree
+		private final double[] split; // per node, at its middle index: the coordinate it splits at
+		private final double a;
+
+		NearestTree(List<float[]> ps, int[] idx, double a) {
+			this.ps = ps;
+			this.idx = idx;
+			this.a = a;
+			split = new double[idx.length];
+			build(0, idx.length, 0);
+		}
+
+		private double coord(int j, int axis) {
+			float[] q = ps.get(j);
+			return axis == 0 ? q[0] : axis == 1 ? q[1] : q[2] * a;
+		}
+
+		/** sorts idx[lo, hi) along axis and recurses into both halves (the split is at the middle; its coordinate is
+		 *  kept, since building the halves sorts them along the next axis) */
+		private void build(int lo, int hi, int axis) {
+			if (hi - lo <= LEAF)
+				return;
+			Integer[] s = new Integer[hi - lo];
+			for (int k = lo; k < hi; k++)
+				s[k - lo] = idx[k];
+			Arrays.sort(s, (u, v) -> Double.compare(coord(u, axis), coord(v, axis)));
+			for (int k = lo; k < hi; k++)
+				idx[k] = s[k - lo];
+			int mid = (lo + hi) >>> 1;
+			split[mid] = coord(idx[mid], axis);
+			build(lo, mid, (axis + 1) % 3);
+			build(mid, hi, (axis + 1) % 3);
+		}
+
+		/** @return { index of the nearest point, its squared distance }, index -1 if none is nearer than bound */
+		double[] nearest(float[] p, double bound) {
+			double[] r = { -1, bound };
+			visit(p, 0, idx.length, 0, r);
+			return r;
+		}
+
+		private void visit(float[] p, int lo, int hi, int axis, double[] r) {
+			if (hi - lo <= LEAF) {
+				for (int k = lo; k < hi; k++) {
+					int j = idx[k];
+					float[] q = ps.get(j);
+					double d = Math.pow(p[0] - q[0], 2) + Math.pow(p[1] - q[1], 2) + Math.pow((p[2] - q[2]) * a, 2);
+					if (d < r[1] || (d == r[1] && r[0] >= 0 && j < r[0])) {
+						r[0] = j;
+						r[1] = d;
+					}
+				}
+				return;
+			}
+			int mid = (lo + hi) >>> 1;
+			double s = split[mid];
+			double pc = axis == 0 ? p[0] : axis == 1 ? p[1] : p[2] * a;
+			int next = (axis + 1) % 3;
+			// the near side first; the far side only if it can hold a point as near as the best (ties count)
+			boolean left = pc < s;
+			if (left)
+				visit(p, lo, mid, next, r);
+			else
+				visit(p, mid, hi, next, r);
+			double gap = Math.max(0.0, Math.abs(pc - s) - MARGIN);
+			if (gap * gap <= r[1]) {
+				if (left)
+					visit(p, mid, hi, next, r);
+				else
+					visit(p, lo, mid, next, r);
 			}
 		}
 	}
@@ -1874,6 +1980,38 @@ public final class RidgeZ {
 
 	double linkCost(float[] p, float[] q) {
 		return Math.hypot(q[0] - p[0], q[1] - p[1]) + w * (1 - Math.abs(q[4] * p[4] + q[5] * p[5]));
+	}
+
+	/**
+	 * Sorts links by linkCost, ties in their order in the list: the order a stable sort by linkCost gives (as List.sort
+	 * with a comparator), with each cost computed once. A comparator computes two costs per comparison, which took most
+	 * of the run on a noise image (tens of millions of links).
+	 */
+	void sortByLinkCost(List<int[]> links) {
+		final int n = links.size();
+		final int[][] l = links.toArray(new int[n][]);
+		final double[] c = new double[n];
+		for (int k = 0; k < n; k++)
+			c[k] = linkCost(P.get(l[k][0]), P.get(l[k][1]));
+		int[] a = new int[n], b = new int[n];
+		for (int k = 0; k < n; k++)
+			a[k] = k;
+		for (long run = 1; run < n; run *= 2) { // bottom-up merge sort; the left element first on a tie: stable
+			for (long lo = 0; lo < n; lo += 2 * run) {
+				int i = (int) lo, mid = (int) Math.min(lo + run, n), j = mid, hi = (int) Math.min(lo + 2 * run, n), k = i;
+				while (i < mid && j < hi)
+					b[k++] = Double.compare(c[a[j]], c[a[i]]) < 0 ? a[j++] : a[i++];
+				while (i < mid)
+					b[k++] = a[i++];
+				while (j < hi)
+					b[k++] = a[j++];
+			}
+			int[] t = a;
+			a = b;
+			b = t;
+		}
+		for (int k = 0; k < n; k++)
+			links.set(k, l[a[k]]);
 	}
 
 	int clampX(int x) {

@@ -350,6 +350,113 @@ public class CiliaQPrepStatistics {
 		return integer ? rank(hist, (long) (m * q)) : er.value(0, 0);
 	}
 
+	/**
+	 * How far the raw signal of a channel rises above its noise, usable for the warning that ridge detection and the
+	 * ridge seeds give before they derive their thresholds (CiliaQPrepMain.noteSignalAtNoise).
+	 * 	- the signal range: p99.9 - median of the raw values of every plane and frame (median - p0.1 for dark lines),
+	 * 	  the ranks as in medianPercentilesMad;
+	 * 	- the noise: its standard deviation from the differences of horizontal neighbours, 1.4826 x their median
+	 * 	  absolute value / sqrt(2). The difference of two noise values has sqrt(2) times the noise's standard deviation,
+	 * 	  and structures change little from one pixel to the next, so they hardly move the median.
+	 * Gain and offset cancel out of the ratio. Pure noise gives about 3 (p99.9 of a normal distribution lies 3.1
+	 * standard deviations above its median). ExactRanks for every bit depth, so the values are exact; NaN is left out.
+	 *
+	 * @param raw		the image holding the unprocessed values
+	 * @param channel	the channel in raw (1-based)
+	 * @param darkLine	median - p0.1 instead of p99.9 - median
+	 * @return { range / noise, range, noise }; NaN where it cannot be measured: the ratio when the noise is 0 (e.g. a
+	 * 			zero background), all three when the channel holds no number
+	 */
+	public static double [] rawSignalToNoise(ImagePlus raw, int channel, boolean darkLine){
+		final int W = raw.getWidth(), H = raw.getHeight();
+		
+		/*	Two groups of ranked values, each with up to two ranks to find:
+		 *		- group 0: the raw pixel values; rank 0 is the median, rank 1 the p99.9 (bright lines) or the p0.1 (dark lines);
+		 *		- group 1: the absolute differences of horizontal neighbours; rank 0 is their median. */		
+		ExactRanks er = new ExactRanks(2, 2);
+		long n = 0;		// number of pixel values (NaN left out)
+		long nd = 0;	// number of neighbour differences (pairs where both pixels are numbers)
+				
+		for (int pass = 0; pass < 2; pass++) {
+			if (pass == 1) {
+				/*	Between the passes: the counts of pass 0 are complete, so the ranks are known. locate picks, per rank, the
+				 *	coarse bin that holds it. Pass 1 then collects only the values in those bins, so the ranks come out exact
+				 *	without storing every value, even for 16-bit or 32-bit stacks of several gigabytes. */
+				if (n == 0)	// every value is NaN, e.g. Divide by Background on an empty channel: nothing can be measured
+					return new double[] { Double.NaN, Double.NaN, Double.NaN };
+				
+				// the median of the values
+				er.locate(0, 0, n / 2);
+				
+				// p0.1 for dark lines, p99.9 for bright lines
+				er.locate(0, 1, (long) (n * (darkLine ? 0.001 : 0.999)));
+				
+				if (nd > 0)	// a one-pixel-wide image, or NaN beside every pixel, has no differences: then the noise stays 0
+					er.locate(1, 0, nd / 2); // the median of the |differences|
+			}
+			
+			/*	Every plane of every time step of this channel: the signal range and the noise are measured on the whole
+			 *	channel, so one value describes it, as the stack-wide thresholds of ridge detection do. */
+			for (int t = 1; t <= raw.getNFrames(); t++) {
+				for (int z = 1; z <= raw.getNSlices(); z++) {
+					ImageProcessor p = raw.getStack().getProcessor(raw.getStackIndex(channel, z, t));
+					for (int i = 0; i < W * H; i++) {
+						
+						// get the pixel value
+						float v = p.getf(i);
+						if (v != v) {
+							// v is NaN: left out of the values and of both differences that would use it
+							continue;
+						}
+						
+						/*	The difference to the right-hand neighbour. Since structures change little from one pixel to
+						 *	the next, this difference is mostly noise. The last pixel of a row has no right-hand neighbour:
+						 *	the pixel at i + 1 starts the next row, so it is skipped. */
+						float d = Float.NaN;
+						if ((i + 1) % W != 0)
+							d = Math.abs(p.getf(i + 1) - v); // NaN if the neighbour is NaN
+						if (pass == 0) {
+							// pass 0: count the value and the difference into the coarse bins
+							er.count(0, v);
+							n++;
+							if (d == d) {
+								// d is not NaN
+								er.count(1, d);
+								nd++;
+							}
+						} else {
+							// pass 1: keep the exact value if it falls into a bin located above
+							er.refine(0, v);
+							if (d == d)
+								er.refine(1, d);
+						}
+					}
+				}
+			}
+		}
+		
+		/*	The signal range: how far the brightest 0.1 % of the pixel values lie above the median (or, for dark lines, the
+		 *	darkest 0.1 % below it). The median stands for the background, since in a fluorescence channel most pixels are
+		 *	background; p99.9 stands for the signal, and it ignores a few hot pixels. */		
+		double median = er.value(0, 0), end = er.value(0, 1);
+		double range = darkLine ? median - end : end - median;
+		
+		/*	The noise, as a standard deviation:
+		 *		- the median of the |differences| is their median absolute deviation, since the differences of noise are
+		 *		  centred on 0;
+		 *		- 1.4826 x a median absolute deviation gives the standard deviation of normally distributed values;
+		 *		- the difference of two independent noise values has sqrt(2) times the noise's standard deviation, so the
+		 *		  division by sqrt(2) gives the noise of a single pixel.
+		 *	Since a median is used, the few large differences at the edges of structures hardly move it. */
+		double noise = nd > 0 ? 1.4826 * er.value(1, 0) / Math.sqrt(2.0) : 0.0;
+		
+		/*	The ratio: how many noise standard deviations the signal rises above the background. Since gain and offset scale
+		 *	or shift range and noise alike, they cancel out, so the same limit (MIN_SIGNAL_TO_NOISE) serves every image and
+		 *	bit depth. With no noise, e.g. a zero background, the ratio is NaN rather than infinite, and the caller reports
+		 *	it as not measurable. */
+		return new double[] { noise > 0.0 ? range / noise : Double.NaN, range, noise };
+	}
+
 	/** The value at 0-based rank k of a histogram of integer values. */
 	static double rank(long [] hist, long k){
 		long acc = 0;

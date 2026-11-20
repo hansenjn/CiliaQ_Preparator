@@ -48,6 +48,16 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	//Name variables
 	public static final String PLUGIN_NAME = "CiliaQ Preparator";
 	public static final String PLUGIN_VERSION = "0.2.1";
+
+	/**
+	 * Below this ratio of raw signal range to noise (CiliaQPrepStatistics.rawSignalToNoise),
+	 * ridge detection and the ridge seeds warn that derived thresholds may follow the noise.
+	 * 
+	 * In an internal test: Pure noise gives about 3 to 6; on real images with filaments the ratio was 35 or more,
+	 * also with only one filament left or with all of them painted over (the background holds more than noise).
+	 * Gain and offset cancel out of the ratio, so one value serves every image.
+	 */
+	static final double MIN_SIGNAL_TO_NOISE = 15.0;
 	
 	//Fix fonts
 	public static final Font SUPER_HEADING_FONT = new Font("Sansserif", Font.BOLD, 16);
@@ -83,7 +93,7 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	static SimpleDateFormat NameDateFormatter = new SimpleDateFormat("yyMMdd_HHmmss");
 	static SimpleDateFormat FullDateFormatter = new SimpleDateFormat("yyyy-MM-dd	HH:mm:ss");
 	static SimpleDateFormat FullDateFormatter2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-	
+		
 	//Progress Dialog
 	ProgressReporter progress;	
 	boolean showGUIs = true;	// False under --headless or in a macro to suppress dialogs and switch to IJ.log.
@@ -258,6 +268,59 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	 *  state), making both runs' ridge results non-reproducible and potentially interleaving the
 	 *  counter reset. Also other downstream methods like the 3D ImageJ Suite could collide.*/
 	private static volatile boolean runInProgress = false;
+
+	/**	The ImageJ pref that holds the last version whose "What's new" dialog was silenced. */
+	static final String WHATS_NEW_PREF = "ciliaQPrep.whatsNewSeen";
+	static final String RELEASE_URL = "https://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v" + PLUGIN_VERSION;
+	static final String WHATS_NEW_TEXT =
+			"New segmentation methods:\n"
+			+ "  - RIDGE DETECTION (filaments, e.g. cilia): one label per filament, touching filaments stay apart\n"
+			+ "  - SPOT DETECTION (dots, e.g. basal bodies), with a minimum spot contrast and range of accepted width\n"
+			+ "  - EXPANSION from seeds (e.g., RIDGEs / SPOTs): touching objects as labels\n"
+			+ "  - PHANSALKAR local threshold and LOCAL FRACTION of the intensity range\n"
+			+ "\n"
+			+ "New options:\n"
+			+ "  - A median filter as the first preprocessing step\n"
+			+ "  - Stack handling per slice\n"
+			+ "  - Binary output that keeps 0- or NA-intensity voxels after preprocessing out of the mask\n"
+			+ "  - Automatic thresholds from the full 16-bit histogram (advanced setting)\n"
+			+ "\n"
+			+ "Output and macros:\n"
+			+ "  - Segmented channels (with and without labels) are marked for CiliaQ v0.2.2, which reads the mark\n"
+			+ "  - Each report ends with the notes and errors of its image; a failing image no longer ends a batch\n"
+			+ "  - Macros: write c1-duplicate or c1-no-duplicate (a macro with neither keeps no copy)\n"
+			+ "  - Flags accept =true / =false; choices are read regardless of case\n"
+			+ "  - Settings files and recorded macros keep every value exactly\n"
+			+ "\n"
+			+ "Fixed:\n"
+			+ "  - Canny 3D thresholds of type 'Custom Value' are applied and recorded.\n"
+			+ "\n"
+			+ "Help:\n"
+			+ "  - The Help buttons of the method dialogs open their pages in the CiliaQ wiki.";
+
+	/**	True if the dialog of this version has not been silenced: the pref holds another version, or none. */
+	static boolean whatsNewDue(String seenVersion){
+		return seenVersion == null || !seenVersion.equals(PLUGIN_VERSION);
+	}
+
+	/**	Shows the "What's new" dialog once per version (dialog runs only, see run()). */
+	private static void showWhatsNew(){
+		if(!whatsNewDue(Prefs.get(WHATS_NEW_PREF, null)))	return;
+		GenericDialog gd = new GenericDialog(PLUGIN_NAME + " v" + PLUGIN_VERSION + " - What's new");
+		gd.setInsets(0,0,0);	gd.addMessage("What's new in " + PLUGIN_NAME + " v" + PLUGIN_VERSION, HEADING_FONT);
+		gd.setInsets(5,0,0);	gd.addTextAreas(WHATS_NEW_TEXT, null, 25, 105);
+		gd.getTextArea1().setEditable(false);
+		gd.setInsets(5,0,0);	gd.addMessage("All changes, and how to install another version: Click 'Release notes' button below.", INSTRUCTIONS_FONT);
+		gd.setInsets(5,0,0);	gd.addCheckbox("Do not show this again until the next update", false);
+		gd.addHelp(RELEASE_URL);
+		gd.setHelpLabel("Release notes");
+		gd.hideCancelButton();
+		gd.showDialog();
+		if(gd.getNextBoolean()){
+			Prefs.set(WHATS_NEW_PREF, PLUGIN_VERSION);
+			Prefs.savePreferences();
+		}
+	}
 	
 public void run(String arg) {
 	synchronized(CiliaQPrepMain.class){
@@ -302,6 +365,7 @@ public void run(String arg) {
 			record = true;
 			Recorder.record = false;
 		}
+		showWhatsNew();
 		
 		GenericDialog gd = new GenericDialog(PLUGIN_NAME + " on " + System.getProperty("os.name") + "");	
 		//show Dialog-----------------------------------------------------------------
@@ -4463,6 +4527,9 @@ private ImagePlus expandFromSeeds(ImagePlus channelImp, ImagePlus origImp, boole
 		 */
 		tp1.append("	Signal range tiles (legend)	" + SignalRange.TILE_LEGEND);
 		noteNaN(origImp, "Channel " + channelWriteImp + ": ridge seeds", progress, tp1);
+		if(!es.toRidgeSettings().advancedOverride) {
+			noteSignalAtNoise(writeImp, channelWriteImp, seedDark, "Channel " + channelWriteImp + ": ridge seeds", progress, tp1);
+		}			
 		String zNote = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.stackNote(origImp, es.toRidgeSettings());
 		if(zNote != null){
 			progress.notifyMessage("Expansion seeds: " + zNote, ProgressReporter.NOTIFICATION);
@@ -4663,6 +4730,45 @@ private void noteNaN(ImagePlus imp, String who, ProgressReporter progress, TextC
 	tp1.append("	NOTE	" + note);
 }
 
+/**
+ * A warning when the raw signal of a channel hardly rises above its noise, once per channel, before ridge detection or
+ * the ridge seeds derive their thresholds from it. The ratio and its parts go into the report in every case.
+ *
+ * Why: thresholds derived from such a channel follow its noise, and the detector traces noise: on a channel without
+ * signal of 2160 x 2160 x 5 voxels it takes about 20 minutes and finds only noise. A warning, not a refusal: the ratio
+ * does not know the sensitivity, and a channel with a few filaments on a clean background can have the same ratio,
+ * while its derived thresholds still work at a high sensitivity.
+ *
+ * @param raw		the image holding the unprocessed values (the output image, before this channel is written)
+ * @param channel	the channel in raw (1-based)
+ * @param darkLine	dark lines: the range below the median
+ * @param who		the start of the message, e.g. "Channel 2" or "Channel 2: ridge seeds"
+ */
+private void noteSignalAtNoise(ImagePlus raw, int channel, boolean darkLine, String who,
+		ProgressReporter progress,
+		TextCollector tp1){
+	double [] sn = CiliaQPrepStatistics.rawSignalToNoise(raw, channel, darkLine);
+	
+	if(!(sn [2] > 0.0)){
+		tp1.append("	Raw signal range / noise	not measurable (no noise in the raw channel, e.g. a zero background)");
+		return;
+	}
+	
+	tp1.append("	Raw signal range / noise	" + df3.format(sn [0]) + " (signal range " + df3.format(sn [1])
+			+ ", noise " + df3.format(sn [2]) + ")");
+	
+	if(sn [0] >= MIN_SIGNAL_TO_NOISE) {
+		return;
+	}
+	
+	String note = "the raw signal range is only " + df3.format(sn [0]) + " times the noise (below "
+			+ df3.format(MIN_SIGNAL_TO_NOISE) + "), so the thresholds derived from it may follow the noise: detection may take"
+			+ " very long and find only noise. If this channel holds cilia, consider setting the upper and lower threshold"
+			+ " yourself ('Show advanced settings') or otherwise leave the channel out.";
+	progress.notifyMessage(who + ": " + note, ProgressReporter.NOTIFICATION);
+	tp1.append("	NOTE	" + note);
+}
+
 
 /**
  * RIDGE DETECTION (Steger line detector) producing a LABEL image.
@@ -4690,6 +4796,9 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 	 *	the refusal. The ridge seeds write the note at the same point. */
 	tp1.append("Ridge detection for channel " + channelWriteImp);
 	noteNaN(channelImp, "Channel " + channelWriteImp, progress, tp1);
+	if(!rs.advancedOverride) {
+		noteSignalAtNoise(writeImp, channelWriteImp, rs.darkLine, "Channel " + channelWriteImp, progress, tp1);
+	}
 	
 	/*	With "Threshold every time step independently", every time step gets statistics and thresholds of its own, in the
 	 *	loop below; otherwise one set serves the whole stack. */
