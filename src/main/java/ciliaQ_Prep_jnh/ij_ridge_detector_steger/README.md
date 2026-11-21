@@ -55,20 +55,24 @@ with the same parameters, in the same Fiji session, can yield a different set of
 lines between runs on identical input. For
 quantitative, mechanistic analysis we require **bit-for-bit reproducible** segmentation,
 so the code was copied in and corrected here. See "Modifications" below. The vendored
-copy also contained three further bugs. Two of them change which lines are detected and are
+copy also contained four further bugs. Two of them change which lines are detected and are
 fixed as modifications 8 and 9. The third caused an ArrayIndexOutOfBoundsException for sigma
-values below 0.7 and is fixed as modification 11.
+values below 0.7 and is fixed as modification 11. The fourth zeroed the responses of long lines
+and is fixed as modification 12.
 
 ## Modifications made to the original
 
-Modifications 1–7 fix determinism or remove unused code and leave the computed lines unchanged.
-Modifications 8 and 9 fix two bugs and **change the output**, see *Observations and their investigation*.
-Modification 11 fixes a third bug (sigma values below 0.7 caused an ArrayIndexOutOfBoundsException)
-and changes nothing where the code worked.
-Modification 12 fixes a fourth bug: a self-assignment in the response-array reallocation silently
-zeroed accumulated response values on lines exceeding the initial buffer size; the fix restores
-correct responses and **changes the output** wherever such reallocation occurred. Every modified file
-carries an inline comment marked `// CiliaQ-MOD:` at the point of change.
+- Modifications 1–7 fix determinism or remove unused code and leave the computed lines unchanged.
+- Modifications 8 and 9 fix two bugs and **change the output**, see *Observations and their investigation*.
+- Modification 10 lets the caller pass the line width and **changes the output** when used.
+- Modification 11 fixes a third bug (sigma values below 0.7 caused an ArrayIndexOutOfBoundsException)
+  and changes nothing where the code worked.
+- Modification 12 fixes a fourth bug: a self-assignment in the response-array reallocation silently
+  zeroed accumulated response values on lines exceeding the initial buffer size; the fix restores
+  correct responses and **changes the output** wherever such reallocation occurred.
+- Modification 13 makes five steps faster on noisy images and leaves the computed lines unchanged.
+
+Every modified file carries an inline comment marked `// CiliaQ-MOD:` at the point of change.
 
 ### Background
 
@@ -133,7 +137,7 @@ were non-reproducible on identical input, and differed even across a JVM restart
 preserve insertion order (driven by deterministic loops over `junctions`/`lines`). Only the
 collection type changed; `contains`/`add`/`get`/`put` semantics are identical.
 *(`buildResolvedList` was later replaced by modification 9. The rule still holds for every collection
-that is iterated; the two plain `HashSet`s it adds are only used for lookups.)*
+that is iterated; the plain hash sets and maps that modifications 9 and 13 add are only used for lookups.)*
 
 7. **Stand-alone plugin GUI removed.** `Lines_.java` (the Ridge Detection menu command and its
 dialog), `GenericDialogPlus.java` and `ResetToDefaultListener.java` were deleted. CiliaQ calls
@@ -197,15 +201,22 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    2 (ceil(2.5 σ) + 1)) entries; from σ 0.7 up that is the old size, so the result is unchanged.
 
 12. Fixed a **response-array reallocation bug** in the line-linking step (`Link.compute_contours`).
-  The original code self-assigned (`resp[o] = resp[o]`)
-  into a freshly allocated array, silently zeroing all accumulated response values
-  whenever a line exceeded the initial buffer size. Responses are now copied correctly.
+   The original code self-assigned (`resp[o] = resp[o]`)
+   into a freshly allocated array, silently zeroing all accumulated response values
+   whenever a line exceeded the initial buffer size. Responses are now copied correctly.
+
+13. **Faster on noise, same output** (`LineDetector.java`, `SlopeOverlapResolver.java`). Five steps took a time
+   that grew with the square of the lines or junctions. `fixJunctions` and the split step (`LineDetector`) and the
+   line ends of a junction cluster (`SlopeOverlapResolver`) now find the lines and junctions near a point from pixel
+   grids, in the order of the loops they replace; the pruning (`LineDetector`) and the junction prune of the overlap
+   resolution take one pass. On a plane without signal (about 170,000 lines and 260,000 junctions), one plane then 
+   took about 1 minute instead of over 15. On the example images tested and on noise, the output is identical.
 
 ### Scope / what was NOT changed
 
 - The detection, width and position-correction mathematics are untouched. Linking is unchanged
-except for the junction sort (8); overlap resolution was rebuilt (9) and can take the line width (10);
-the search-line buffer fits small sigmas (11).
+except for the junction sort (8) and the response copy (12); overlap resolution was rebuilt (9) and can take the line width (10);
+the search-line buffer fits small sigmas (11); five slow steps are faster, with the same output (13).
 
 ## How CiliaQ sets the thresholds it passes in (not a modification of this code)
 

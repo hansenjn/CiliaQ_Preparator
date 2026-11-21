@@ -54,7 +54,7 @@ public class FractionSettings {
 	 * The global statistic is taken over the whole image, where the 99.9th percentile is a stable
 	 * extreme. A 64 x 64 tile holds 4096 pixels, so its 99.9th percentile is the 4th brightest pixel in
 	 * the tile - an estimate driven by single hot pixels. The local method therefore uses p99 (the 41st
-	 * brightest), which is what D6c calibrated.
+	 * brightest).
 	 */
 	public double signalPercentileGlobal = 99.9;
 	public double signalPercentileLocal = 99.0;

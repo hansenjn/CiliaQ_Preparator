@@ -6,8 +6,8 @@ package ciliaQ_Prep_jnh;
  * In August 2026 for version v0.2.0, changed this to implement ProgressReporter
  * to implement headless- and console-based running of CiliaQ Preparator.
  * 
- * In October 2026 for version v0.2.1, copied a new dialog from CiliaQ development
- * that is more efficient in handling large numbers of files and has throttling.
+ * In October 2026 for version v0.2.1, adopted CiliaQ's dialog, which handles large
+ * numbers of files better and throttles its updates.
  */
 
 import java.awt.BorderLayout;
@@ -29,7 +29,7 @@ import javax.swing.SwingConstants;
 import ij.IJ;
 
 public class ProgressDialog extends javax.swing.JFrame implements ActionListener, ProgressReporter{
-	// From V0.2.2 on: use LinkedLists instead of arrays for better performance
+	// LinkedLists instead of arrays, for speed
 	private LinkedList<String> dataLeft = new LinkedList<>();
 	private LinkedList<String> dataRight = new LinkedList<>();
 	private LinkedList<String> notifications = new LinkedList<>();
@@ -327,7 +327,7 @@ public class ProgressDialog extends javax.swing.JFrame implements ActionListener
 		}
 	}
 	
-	// New in v0.2.0 - throttle messages for speed up during heavy logging
+	// New in v0.2.1 - throttle messages for speed up during heavy logging
 	public synchronized void notifyMessage(String message, int type){	// V0.2.1: synchronized, see getNotes
 		message = ProgressReporter.withTask(message, task, tasks);		// V0.2.1: every message names its task
 		if(type == ProgressReporter.ERROR){
@@ -339,7 +339,11 @@ public class ProgressDialog extends javax.swing.JFrame implements ActionListener
 		notificationTasks.addFirst(task);	// New V0.2.1
 		notificationTypes.addFirst(type);	// New V0.2.1
 		scheduleNotificationUpdate();
-		if(type == ProgressReporter.ERROR)	forceUIUpdate();      // never throttle errors
+		if(type != ProgressReporter.LOG) {
+			// never throttle errors and notes: shortly after an update, a note would wait for the next one,
+			// which may be a long step away
+			forceUIUpdate();
+		}		
 	}
 	
 	/**

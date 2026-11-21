@@ -27,17 +27,19 @@ import java.util.Arrays;
 
 //import java.util.HashMap;
 //import java.util.HashSet;
-// CiliaQ-MOD: every HashSet/HashMap in this class that is ITERATED is a LinkedHashSet/LinkedHashMap.
-// Line and Junction do NOT override hashCode(), so iterating a HashSet<Line> or HashMap<Line,...>
-// follows identity-hash order, which varies between JVM runs - that made the original's detected
-// lines non-reproducible on identical input. Insertion order is driven by deterministic loops over
-// lines and junctions. The two plain HashSets left (jPts, visited in resolveByJunctionClusters) are
-// only used for contains/add and never iterated.
-//
-// CiliaQ-MOD (modification 9): the merge step was rebuilt (resolve -> resolveByJunctionClusters). The
-// original findOverlap, buildIntersectionMaps, both buildMergeList, buildResolvedList and fillArray,
-// and the helpers only they used, were removed. See README.md, modification 9.
 
+/*
+ * CiliaQ-MOD: every HashSet/HashMap in this class that is ITERATED is a LinkedHashSet/LinkedHashMap.
+ * Line and Junction do NOT override hashCode(), so iterating a HashSet<Line> or HashMap<Line,...>
+ * follows identity-hash order, which varies between JVM runs - that made the original's detected
+ * lines non-reproducible on identical input. Insertion order is driven by deterministic loops over
+ * lines and junctions. The plain hash sets and maps left (jPts and visited in resolveByJunctionClusters,
+ * the cell grid of the line ends, the identity sets of the junction prune) are only looked up, never iterated.
+ * 
+ * CiliaQ-MOD (modification 9): the merge step was rebuilt (resolve -> resolveByJunctionClusters). The
+ * original findOverlap, buildIntersectionMaps, both buildMergeList, buildResolvedList and fillArray,
+ * and the helpers only they used, were removed. See README.md, modification 9.
+ */
 
 import java.util.List;
 import java.util.Map;

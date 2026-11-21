@@ -8,12 +8,15 @@ import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
 /**
  * CiliaQ Preparator - settings for the in-house Phansalkar local threshold.
  *
- * This method tackles variation in FOREGROUND brightness. Rolling-ball and divide-by-background correct the *background*
- * but, if one cilium is far brighter than another, a global threshold may either loses the dim one or inflates the bright one.
+ * This method tackles variation in FOREGROUND brightness. Rolling-ball and
+ * divide-by-background correct the *background* but, if one cilium is far
+ * brighter than another, a global threshold may either lose the dim one or
+ * inflate the bright one.
  *
- * Phansalkar's p*exp(-q*mean) term raises the threshold multiplicatively in dim regions, which
- * suppresses noise in background-only windows - avoiding the failure of simpler local thresholds
- * (Mean +/- C, mean + k*sd, Niblack) on sparse structures. Phansalkar is tuned for low-contrast staining.
+ * Phansalkar's p*exp(-q*mean) term raises the threshold multiplicatively in dim
+ * regions, which suppresses noise in background-only windows - avoiding the
+ * failure of simpler local thresholds (Mean +/- C, mean + k*sd, Niblack) on
+ * sparse structures. Phansalkar is tuned for low-contrast staining.
  *
  * Added in v0.2.1.
  *
@@ -26,7 +29,7 @@ public class PhansalkarSettings {
 	/** The dropdown entry, beside the other named methods. */
 	public static final String NAME = "PHANSALKAR local threshold";
 
-	/** Radius in PIXELS, per D4c-units. */
+	/** Radius in PIXELS. */
 	public double radius = 15.0;
 
 	/** Phansalkar's four constants; the published defaults. */
@@ -68,8 +71,7 @@ public class PhansalkarSettings {
 		gd.setInsets(10, 0, 0);
 		gd.addNumericField("Radius (pixels)", settingsInstance.radius, 2);
 		gd.setInsets(-3, 20, 0);
-		gd.addMessage("Must be larger than the objects, or an object becomes its own background."
-				+ " Measured 15-50 px on the test data.",
+		gd.addMessage("Must be larger than the objects, or an object becomes its own background.",
 				ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT);
 
 		gd.setInsets(10, 0, 0);

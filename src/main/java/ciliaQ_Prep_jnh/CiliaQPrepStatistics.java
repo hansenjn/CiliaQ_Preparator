@@ -573,7 +573,7 @@ public class CiliaQPrepStatistics {
 
 		/**
 		 * @return v with at least minDecimals decimals, and more where needed so that Double.parseDouble gives v back
-		 * (e.g. a contrast sensitivity of 0.0908 is no longer written as 0.091); always a dot, never an exponent.
+		 * (e.g. a contrast sensitivity of 0.0908 is written as 0.0908, not 0.091); always a dot, never an exponent.
 		 */
 		public static String exact(double v, int minDecimals){
 			if(Double.isNaN(v) || Double.isInfinite(v))	return Double.toString(v);

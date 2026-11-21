@@ -514,9 +514,6 @@ public class RidgeSettings implements Cloneable {
 		}
 		sb.append("		Advanced values overridden by user	").append(advancedOverride).append("\n");
 		sb.append("		Dark line	").append(darkLine).append("\n");
-		/*	Three separate lines, not one combined "a / b / c" line. The settings reader parses this
-		 *	block as key/value pairs, so a combined line cannot be read back into three booleans - and
-		 *	before this was split, all three were silently lost on every settings-file round trip. */
 		sb.append("		Correct position	").append(correctPosition).append("\n");
 		sb.append("		Estimate width	").append(estimateWidth).append("\n");
 		sb.append("		Extend line	").append(extendLine).append("\n");

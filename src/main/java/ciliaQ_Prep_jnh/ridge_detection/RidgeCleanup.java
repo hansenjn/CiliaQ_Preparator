@@ -56,8 +56,12 @@ public class RidgeCleanup {
 	/** Which rules this call runs: 3D reads branch and crossing off the lines as 2D sees them, the rest off its own. */
 	public boolean runLineRules = true, runOtherRules = true;
 
-	/** Fixed constants of the rules, in line widths. */
-	static final double KINK_ARM = 2, PAR_MIN = 0.5, PAR_MAX = 1.2, PAR_LEN = 2, TOUCH = 1.5, SHARE = 0.5, CONTINUITY_BLUR = 1;
+	/** Fixed constants of the rules, in line widths; SHARE and BRANCH_TOUCH_PX are in px. */
+	static final double KINK_ARM = 2, PAR_MIN = 0.5, PAR_MAX = 1.2, PAR_LEN = 2, SHARE = 0.5, CONTINUITY_BLUR = 1;
+	
+	/** How near counts as touching: a line end at another line's side (branch rule, in px), and a runner's end at the
+	 *  other runner (turn release, in line widths). */
+	static final double BRANCH_TOUCH_PX = 1.5, TURN_TOUCH_W = 1.5;
 
 	/** Counters for the log. */
 	public int nKink, nBranch, nCross, nPar, nHairpin;
@@ -222,7 +226,7 @@ public class RidgeCleanup {
 	 * hold:
 	 * <ol>
 	 *   <li>PROXIMITY - P's end reaches Q (directly, or via a short connecting line C), within the touch distance
-	 *       J = TOUCH * w.</li>
+	 *       J = TURN_TOUCH_W * w.</li>
 	 *   <li>TURN - the path actually bends: the outward direction at P's end and the direction at the landing point
 	 *       differ by at least turnAngle. Directions are unit vectors, so their turn is measured by the dot product;
 	 *       |tp . tq| <= cos(turnAngle) means the (undirected) angle between them is >= turnAngle. The absolute value
@@ -252,7 +256,7 @@ public class RidgeCleanup {
 	 * @return true if the pair is one folded filament (release it), false to keep the pair apart
 	 */
 	boolean turnJoins(float[][] A, float[][] B, List<float[][]> out, int ia, int ib, double w) {
-		double J = TOUCH * w, cosL = Math.cos(Math.toRadians(turnAngle));
+		double J = TURN_TOUCH_W * w, cosL = Math.cos(Math.toRadians(turnAngle));
 		for (int side = 0; side < 2; side++) {
 			float[][] P = side == 0 ? A : B, Q = side == 0 ? B : A;
 			int iq = side == 0 ? ib : ia, ip = side == 0 ? ia : ib;
@@ -575,7 +579,7 @@ public class RidgeCleanup {
 					int m = M[0].length;
 					if (e[1] < w || m - 1 - e[1] < w)
 						continue;
-					if (Math.hypot(M[0][e[1]] - x, M[1][e[1]] - y) <= TOUCH)
+					if (Math.hypot(M[0][e[1]] - x, M[1][e[1]] - y) <= BRANCH_TOUCH_PX)
 						return e[0];
 				}
 		return -1;

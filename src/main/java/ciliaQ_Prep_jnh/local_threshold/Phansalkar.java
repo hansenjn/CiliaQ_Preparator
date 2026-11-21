@@ -19,20 +19,21 @@ import ij.plugin.filter.RankFilters;
  *     almost zero, and the threshold with it - any pixel one grey level above its neighbourhood passes.
  *
  * This implementation reproduces Fiji's Auto_Local_Threshold (Phansalkar method) on 16-bit data.
- * Three details are required to match its output; each was wrong in an earlier attempt:
+ * Three details are required to match its output:
  *
  *  - CIRCULAR kernel. The local mean and variance are computed with RankFilters (MEAN and VARIANCE),
  *    which use a circular mask of the given radius. A square box filter (e.g. via integral images) gives
  *    different results. RankFilters ships with ImageJ, so this adds no dependency.
- *  - MIN-MAX normalisation. Before applying the formula the slice is stretched so its minimum maps to 0
- *    and its maximum to 1. Dividing by the maximum alone (without subtracting the minimum) only agrees
+ *  - MIN-MAX normalisation. Before applying the formula the image is stretched so its minimum maps to 0
+ *    and its maximum to 1; for a stack, the caller passes the minimum and maximum of the whole stack, so all
+ *    slices share one scale. Dividing by the maximum alone (without subtracting the minimum) only agrees
  *    when the data already starts at zero (see the second surface() overload).
  *  - NORMALISE BY THE IMAGE RANGE, not the data-type range. The range comes from the actual pixel values,
  *    not from the type maximum (e.g. 65535 for 16-bit). Using the type maximum would compress the image
  *    into part of [0,1] and distort the exp(-q*mean) term, which is only meaningful on a true [0,1] range.
  *
- * Note: Since this implementation uses min/max ranges, it is advised to combine it with a median filter.
- * @TODO add note in wiki
+ * Note: Since this implementation uses min/max ranges, a single bright pixel sets the maximum of the whole stack and
+ * so shifts the threshold in every slice. It is advised to combine it with a median filter.
  *
  * Added in V0.2.1.
  *

@@ -59,7 +59,7 @@ public class ExpansionSettings {
 	/** Only used when seedSource is SEED_SPOT. */
 	public double spotDiameter = 5.0;
 	public double spotSensitivity = ciliaQ_Prep_jnh.spot_detection.SpotSettings.DEFAULT_CONTRAST;
-		//the minimum spot contrast in intensity (was a DoG prominence)
+		// the minimum spot contrast, in pixel intensities
 	
 	/** The wiki page of the seed tool, the target of the dialog's Help button. */
 	public static final String HELP_URL = "https://github.com/hansenjn/CiliaQ/wiki/Expansion-from-seeds-in-CiliaQ-Preparator";

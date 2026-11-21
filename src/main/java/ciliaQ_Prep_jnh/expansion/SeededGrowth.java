@@ -10,9 +10,8 @@ import ij.process.ImageProcessor;
 /**
  * CiliaQ Preparator - EXPANSION from seeds: one competitive-growth engine with a pluggable seed source.
  *
- * This expansion tool can work for both LoG seeds or any other high threshold seed
- * (hysteresis kind of seeding). So there is exactly ONE growth implementation here
- * and the seed source is a user choice.
+ * ONE growth engine, and the seed source is the user's choice: high-threshold cores,
+ * spot maxima or ridge lines.
  *
  * Seeds (choice)  ->  competitive growth inside (v > low)  ->  LABEL image
  * 
@@ -20,12 +19,10 @@ import ij.process.ImageProcessor;
  *
  * Note:
  *  - TOUCHING filaments separate.
- *  - CROSSING filaments do NOT separate, and no intensity-based seeding can make them.
- *    Where two cilia cross they overlap, so the crossing is the BRIGHTEST part of the object and the
- *    high-threshold cores stay connected exactly where the separation is needed.
+ *  - CROSSING filaments do NOT separate, and no intensity-based seeding can make them separate.
  *
- * Mask components that contain no seed at all are given their own labels rather than dropped - without
- * that step the tool would silently delete objects the seed detector missed.
+ * Mask components that contain no seed are dropped, as classic hysteresis drops them, and counted, so the
+ * report says how much was dropped (grow with discardUnseeded false gives each its own label instead).
  * 
  * Added in V0.2.1.
  * 
@@ -259,11 +256,11 @@ public class SeededGrowth {
 		}
 
 		/*
-		 * Mask components with no seed inside them are still objects. Give each its own label, or the
-		 * tool would silently delete whatever the seed detector missed - the opposite of lossless.
-		 */
-		
-		int next = maxSeed + 1;									 // fresh ids start above the seed ids
+		 * With discardUnseeded false, mask components with no seed inside them are still objects: each gets
+		 * its own label. With discardUnseeded true they were removed from the mask above, and the growth has
+		 * labelled every voxel of the components that hold a seed, so nothing is left to label here.
+		 */		
+		int next = maxSeed + 1;	// fresh ids start above the seed ids
 		for (int i = 0; i < n; i++) {
 			if (mask[i] && lab[i] == 0) {
 				floodFill(mask, lab, i, next);	// fill the whole blob with one new id

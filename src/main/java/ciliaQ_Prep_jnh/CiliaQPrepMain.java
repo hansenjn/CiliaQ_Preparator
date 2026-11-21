@@ -12,7 +12,7 @@ package ciliaQ_Prep_jnh;
 * GNU General Public License for more details.
 * 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 16, 2026)
+* Date: September 29, 2019 (This Version: November 20, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -118,21 +118,10 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	public static final String STACK_NO_STACK = "input image is no stack";
 	final static String[] stackMethod = { STACK_POOLED, STACK_MIP, STACK_PER_SLICE, STACK_NO_STACK };
 	
-	/**	
-	 * This array is already here to allow renaming methods in the future if needed
-	 * For now this is obsolete since there is just an entry that is identical anyhow
-	 * Adapt in future if needed
-	 *	*/
-	final static String[][] legacyStackMethod = {
-			{ "apply threshold determined in the stack histogram", STACK_POOLED } };
-	
 	/**	@return the current label for a saved one, or null if it matches nothing. */
 	static String matchStackMethod(String line){
 		for(int i = 0; i < stackMethod.length; i++){
 			if(line.contains(stackMethod [i]))	return stackMethod [i];
-		}
-		for(int i = 0; i < legacyStackMethod.length; i++){
-			if(line.contains(legacyStackMethod [i][0]))	return legacyStackMethod [i][1];
 		}
 		return null;
 	}
@@ -419,11 +408,7 @@ public void run(String arg) {
 			/*
 			 *	SECONDARY SETTINGS DIALOGS, ONE PER CHANNEL, IN CHANNEL ORDER.
 			 *
-			 *	v0.2.1 replaced seven separate per-method loops with this single loop. With the old
-			 *	shape the dialogs appeared grouped BY METHOD, so a user whose channel 1 used HYSTERESIS
-			 *	and channel 2 used RIDGE was asked for the ridge settings first - hysteresis was the last
-			 *	block of the seven. Channel order is what the user expects, and one loop cannot drift
-			 *	out of step with the dropdown the way seven copies can.
+			 *	One loop for every method, so the dialogs come in the order of the channels.
 			 */
 			for(int i = 0; i < channelIDs.length; i++){
 				String task = "channel " + (i+1) + " with channel nr " + channelIDs [i];
@@ -890,6 +875,10 @@ public void run(String arg) {
 			
 			//processing
 			int addC = 0;
+			
+			// The channels not segmented because they hold no signal (isFlat): reportMaskMetrics gives them no threshold note
+			boolean [] notSegmented = new boolean [channelIDs.length];
+			
 		   	for(int c = 0; c < channelIDs.length; c++){
 		   		if(keepAwake) {
 					stayAwake();
@@ -970,6 +959,7 @@ public void run(String arg) {
 												: "Threshold(s)")
 								+ " for channel " + channelIDs[c]);
 						tp1.append("	Not segmented	every voxel has the same value after preprocessing (no signal)");
+						notSegmented [c] = true;
 						clearChannel(procImp, channelIDs[c], 0);
 						tempImp.changes = false;
 						tempImp.close();
@@ -1064,8 +1054,6 @@ public void run(String arg) {
 		   					break running;
 		   				}catch(Exception e) {
 		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Expansion from seeds failed."
-		   							+ "\nIf the seed source is ridge detection, verify that the Ridge Detection"
-		   							+ " plugin and commons-lang3 are installed."
 		   							+ "\nError message: " + e.getMessage()
 									+ "\nError localized message: " + e.getLocalizedMessage()
 									+ "\nError cause: " + e.getCause() 
@@ -1293,7 +1281,7 @@ public void run(String arg) {
 		   	 * finishPendingLabels, because the label-producing methods have written nothing before it and
 		   	 * would all measure as empty.
 		   	 */
-		   	reportMaskMetrics(procImp, imp, tp1, progress, task, tasks);
+		   	reportMaskMetrics(procImp, imp, tp1, progress, task, tasks, notSegmented);
 
 		   	if(addC > 0){
 		   		tempImp = IJ.createHyperStack(imp.getTitle() + " cq", imp.getWidth(), imp.getHeight(), 
@@ -2293,10 +2281,9 @@ private File redirectTifToTxt(File chosen){
  *	macro option. Ones with a value, "c1-ridge-width=6", are read HERE. Bare flags with no value,
  *	"c1-ridge-no-crossings", MUST be read with macroFlag instead.
  *
- *	Mixing them up is silent and was a real bug: "resolveCrossings = macroValue(...) == null" is
- *	unconditionally TRUE for a bare flag, because this method looks for "key=" and finds nothing. The
- *	recorder wrote ridge-no-crossings and the reader ignored it. So if the key turns out to be present as
- *	a bare token, this method now SAYS SO rather than returning null and letting the caller guess.
+ *	Mixing them up is silent: "resolveCrossings = macroValue(...) == null" is always TRUE for a bare flag,
+ *	because this method looks for "key=" and finds nothing. So if the key turns out to be present as a bare
+ *	token, this method SAYS SO rather than returning null and letting the caller guess.
  */
 private String macroValue(String options, String key){
 	if(options == null) return null;
@@ -2459,7 +2446,7 @@ private static String flagValue(String padded, String key){
  * name them, so a macro that also passes e.g. c1-method=[Otsu] is not silently run with the file's method.
  */
 private void warnKeysIgnoredBySettingsFile(String options){
-	// the file's "Number format:" line (since 2b) overrides number-format=, so it is named then; files without the line keep the macro's
+	// the file's "Number format:" line overrides number-format=, so it is named then; files without the line keep the macro's
 	boolean fileHasFormat = false;
 	try{
 		fileHasFormat = new String(java.nio.file.Files.readAllBytes(new File(macroValue(options, "settings")).toPath()),
@@ -3092,9 +3079,7 @@ private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_de
 	
 	/*
 	 * macroFlag, NOT macroValue. macroValue looks for "key=" and so returns null
-	 * for a BARE flag, which made "macroValue(...) == null" unconditionally true -
-	 * ridge-no-crossings was written by the recorder and then silently ignored on
-	 * the way back in.
+	 * for a BARE flag, which would make "macroValue(...) == null" always true.
 	 */
 	rs.resolveCrossings = !macroFlag(options, key + "no-crossings");
 	rs.darkLine = macroFlag(options, key + "dark");
@@ -3102,7 +3087,7 @@ private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_de
 	/*
 	 * Negative flags, because these three default to TRUE - same convention as
 	 * ridge-no-crossings. Without them a GUI user could switch a detector option
-	 * off and neither the recorded macro nor the optimizer could reproduce it.
+	 * off and the recorded macro could not reproduce it.
 	 */
 	rs.correctPosition = !macroFlag(options, key + "no-correct-position");
 	rs.estimateWidth = !macroFlag(options, key + "no-estimate-width");
@@ -3397,7 +3382,8 @@ private boolean readSettingsFromMacroString(String options){
  * @param key	the prefix of every key, "c<n>-ridge-" or "c<n>-exp-ridge-"
  * @param rs	the ridge settings to record
  * @return the keys, each followed by a space
- */private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
+ */
+private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
 	String s = "";
 	s += key + "width=" + Numbers.exact(rs.lineWidth, 3) + " ";
 	s += key + "sensitivity=" + Numbers.exact(rs.sensitivity, 3) + " ";
@@ -3756,7 +3742,7 @@ private void markSegmentedChannels(ImagePlus outImp, ImagePlus imp){
 				try{
 					label = imp.getStack().getSliceLabel(imp.getStackIndex(c+1, s+1, f+1));
 				}catch(Exception e){
-					// <what fails here, e.g. a virtual stack whose label cannot be read>: use the generic label below
+					// e.g. a virtual stack whose label cannot be read: use the generic label below
 					label = null;
 				}
 				if(label == null || label.isEmpty()){
@@ -3817,7 +3803,7 @@ private ImagePlus copyChannel(ImagePlus imp, int channel, boolean adjustDisplayR
  * local tile grid are computed on the projection and the resulting surface is applied to every slice.
  *
  * Statistics come from the image passed in, which the caller has already pre-blurred, background
- * subtracted/divided and post-blurred, per decision.
+ * subtracted/divided and post-blurred.
  */
 private ciliaQ_Prep_jnh.fraction_threshold.FractionThreshold.Result [][] getFractionThresholds(
 		ImagePlus imp, ciliaQ_Prep_jnh.fraction_threshold.FractionSettings st, boolean localMethod,
@@ -4068,10 +4054,11 @@ private double [] getThresholds (ImagePlus imp, String chosenMethod, String chos
 
 /**
  * New V0.2.1: Write mask metrics and warnings into `_CQP.txt`, so they can be found also later
- * @param procImp the segmented output, @param origImp the unmodified input
+ * @param procImp the segmented output, @param origImp the unmodified input, @param notSegmented the channels not
+ * segmented because they hold no signal (no threshold was computed, so no threshold note)
  */
 private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollector tp1,
-		ProgressReporter progress, int task, int tasks){
+		ProgressReporter progress, int task, int tasks, boolean [] notSegmented){
 	tp1.append("");
 	tp1.append("Mask metrics per segmented channel");
 	tp1.append("	Channel	Total voxels	Foreground voxels	Foreground %	Non-zero voxels in input");
@@ -4118,7 +4105,7 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 					+ " written as 0. CiliaQ treats only voxels > 0 as foreground, so it will see a"
 					+ " smaller object than the segmentation found. This happens when a blur or another"
 					+ " filter extends the mask over background that is exactly 0. Choose a binary"
-					+ " segmentation style to keep them.", ProgressReporter.NOTIFICATION);	// V0.2.1: also into the report
+					+ " segmentation style to keep them.", ProgressReporter.NOTIFICATION);
 			}
 		}
 
@@ -4128,7 +4115,7 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 		if(origNonZero == 0){
 			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": channel " + channelIDs [c]
 				+ " of the input is entirely zero, so the segmented output is empty too."
-				+ " Check that the channel number is right.", ProgressReporter.NOTIFICATION);	// V0.2.1: also into the report
+				+ " Check that the channel number is right.", ProgressReporter.NOTIFICATION);
 			continue;
 		}
 
@@ -4139,7 +4126,8 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 		 * */
 		boolean thresholdMethod = !(RIDGE_DETECTION.equals(chosenAlgorithms [c])
 				|| SPOT_DETECTION.equals(chosenAlgorithms [c])
-				|| EXPANSION_SEEDS.equals(chosenAlgorithms [c]));
+				|| EXPANSION_SEEDS.equals(chosenAlgorithms [c])
+				|| notSegmented [c]);	// not segmented (no signal): no threshold was computed
 		long zeroBackground = total - origNonZero;
 		if(!thresholdMethod){
 			// nothing to say about a threshold
@@ -4159,18 +4147,18 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 			 *	if value < threshold), so every voxel of the channel is set to the maximum. */
 			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
 				+ ": every voxel became foreground, also the " + zeroBackground + " voxels of the zero background -"
-				+ " the threshold is at or below 0, so it separated nothing. Evaluate the output and consider to"
-				+ " refine preprocessing, or use RIDGE or SPOT DETECTION instead.",
+				+ " the threshold is at or below 0, so it separated nothing. Evaluate the output and consider"
+				+ " refining the preprocessing, or use RIDGE or SPOT DETECTION instead.",
 				ProgressReporter.NOTIFICATION);
 		}else if(keptNonZero == origNonZero){
 			/*	THRESHOLD HAD NO EFFECT. The input has a background of exactly 0, and the mask still kept every
 			 *	non-zero voxel: the threshold sat below the lowest non-zero intensity, so it separated nothing,
 			 *	and any other auto-threshold method below that value gives the identical mask. Typical for
-			 *	exports rescaled from a low-bit source (e.g. Human Protein Atlas images). */
+			 *	exports rescaled from a low-bit source, e.g. 8-bit data saved as 16-bit. */
 			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
 				+ ": the segmentation kept every non-zero voxel of the input (" + origNonZero + "), so the"
 				+ " threshold separated nothing beyond the zero background. Another auto-threshold method"
-				+ " may give the same mask - evaluate the output and consider to refine preprocessing,"
+				+ " may give the same mask - evaluate the output and consider refining the preprocessing,"
 				+ " or use RIDGE or SPOT DETECTION instead.",
 				ProgressReporter.NOTIFICATION);
 		}
@@ -4388,8 +4376,7 @@ private void deriveSeedRidge(ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs, I
  * 
  * New in V0.2.1
  * 
- * This expansion tool can work for both LoG seeds or any other high threshold seed (hysteresis kind of seeding)".
- * So there is ONE growth engine and the seed source is a user choice - ridge lines for filaments,
+ * ONE growth engine, and the seed source is the user's choice: ridge lines for filaments,
  * spot maxima for punctate structures, high-intensity cores as the fallback that needs no extra detector.
  *
  * Like ridge detection it RETURNS the image to use from here on (writing labels may require promoting
@@ -4408,7 +4395,7 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 
 	String warn = es.minPieceSizeWarning();
 	if(warn != null){
-		progress.notifyMessage("Channel " + channelWriteImp + ": " + warn, ProgressReporter.NOTIFICATION);	// V0.2.1: also into the report
+		progress.notifyMessage("Channel " + channelWriteImp + ": " + warn, ProgressReporter.NOTIFICATION);
 	}
 	if(keepIntensities){
 		progress.notifyMessage("Channel " + channelWriteImp + ": expansion writes a LABEL image, so"
@@ -4670,7 +4657,7 @@ private void deriveRidgeOrRefuse(ciliaQ_Prep_jnh.ridge_detection.RidgeSettings r
 	if(reject != null) throw new SettingsRejectedException(reject);
 	
 	// Additional check: near-zero upper threshold means the detector will trace noise and can hang. The
-	// MAD guard abovemisses this on background-free data (MAD = 0), so we catch it here, before detection.
+	// MAD guard above misses this on background-free data (MAD = 0), so we catch it here, before detection.
 	if(rs.upperThreshold <= 1e-6){
 		throw new SettingsRejectedException("ridge detection: the derived upper threshold is ~0 for this channel "
 				+ "(median " + df3.format(median) + ", MAD " + df3.format(mad) + ", signal range " + df3.format(sr.range) + "), "
@@ -4781,7 +4768,7 @@ private void noteSignalAtNoise(ImagePlus raw, int channel, boolean darkLine, Str
  *
  * The thresholds are derived HERE, from the signal range of the channel (CiliaQPrepStatistics.SignalRange), and
  * not in the settings dialog: a dialog listener never fires in macro or headless mode, so deriving there would give
- * every optimizer run unconverted defaults.
+ * every macro and headless run unconverted defaults.
  */
 private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressReporter progress,
 		ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs, ImagePlus writeImp, int channelWriteImp,
@@ -5407,9 +5394,12 @@ private double getHistogramThreshold (ImagePlus imp, String algorithm){
 	/*	New in V0.2.1: " 16-bit" with the 16-bit histogram option, unless the method fails on it (see full16BitWorks). */
 	boolean full16 = useFull16BitHistogram(imp) && full16BitWorks(imp, algorithm, 1, true);
 	
-	// calculate thresholds	
-	IJ.setAutoThreshold(imp, (algorithm +" dark stack" + (full16 ? " 16-bit" : "")));	// New in V0.2.1: " 16-bit" when chosen
-	// TODO Find a way to replace with imp.getProcessor().setAutoThreshold(Method.valueOf(Method.class,algorithm), true);
+	/*
+	 * Calculate thresholds (New in V0.2.1: " 16-bit" when chosen)
+	 * The stack call, not ip.setAutoThreshold(Method, true): only it uses the histogram of all slices and offers " 16-bit"
+	 */
+	IJ.setAutoThreshold(imp, (algorithm +" dark stack" + (full16 ? " 16-bit" : "")));
+		
 	return imp.getProcessor().getMinThreshold();
 }
 
@@ -5577,19 +5567,19 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 			tp.append("		Channel duplicated to include a copy of the channel that is not segmented.");
 		}else{tp.append("");}
 		if(medianFilter [i]){
-			tp.append("		Median filter before blurring:	" + df3.format(medianRadius[i]));
+			tp.append("		Median filter before blurring:	" + Numbers.exact(medianRadius[i], 3));
 		}else{tp.append("");}
 		if(preBlur [i]){
-			tp.append("		Gaussian blur before background removal:	" + df3.format(preBlurRadius[i]));
+			tp.append("		Gaussian blur before background removal:	" + Numbers.exact(preBlurRadius[i], 3));
 		}else{tp.append("");}
 		if(subtractBackground [i]){
-			tp.append("		Subtract Background:	" + df3.format(subtractBGRadius[i]));
+			tp.append("		Subtract Background:	" + Numbers.exact(subtractBGRadius[i], 3));
 		}else{tp.append("");}
 		if(divideBackground [i]){
-			tp.append("		Divide By Background:	" + df3.format(divideBGRadius[i]));
+			tp.append("		Divide By Background:	" + Numbers.exact(divideBGRadius[i], 3));
 		}else{tp.append("");}
 		if(additionalBlur [i]){
-			tp.append("		Additional blur with Gaussian:	" + df3.format(additionalBlurRadius[i]));
+			tp.append("		Additional blur with Gaussian:	" + Numbers.exact(additionalBlurRadius[i], 3));
 		}else{tp.append("");}
 		if("CANNY 3D".equals(chosenAlgorithms [i])){
 			tp.append("		Segmentation method:	" + "Canny 3D Thresholder, a plugin by Sebastian Rassmann,"
@@ -5626,7 +5616,7 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 			}
 		}else if ("CUSTOM threshold".equals(chosenAlgorithms[i])){
 			tp.append("		Segmentation method:	" + "CUSTOM threshold");
-			tp.append("			Custom threshold value:	" + df6.format(customThr [i]));
+			tp.append("			Custom threshold value:	" + Numbers.exact(customThr [i], 6));
 		}else if (RIDGE_DETECTION.equals(chosenAlgorithms[i])){
 			tp.append("		Segmentation method:	" + "RIDGE DETECTION (filaments), Steger line detector"
 					+ " - CiliaQ's modified, deterministic copy of the Ridge Detection plugin by Thorsten"
@@ -5718,9 +5708,8 @@ private void readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jn
 	rs.darkLine = blockBoolean(kv, "Dark line", rs.darkLine);
 
 	/*
-	 * These three are Steger detector switches that the dialog exposes. They were
-	 * lost on every round trip until report() stopped combining them into one
-	 * "a / b / c" line - see RidgeSettings.report().
+	 * These three are Steger detector switches that the dialog exposes, each on a line of its own
+	 * (see RidgeSettings.report()).
 	 */
 	rs.correctPosition = blockBoolean(kv, "Correct position", rs.correctPosition);
 	rs.estimateWidth = blockBoolean(kv, "Estimate width", rs.estimateWidth);
@@ -5788,8 +5777,8 @@ private java.util.HashMap<String,String> readIndentedBlock(BufferedReader br) th
 		if(l.trim().length() == 0)	continue;			// report() pads with blank lines
 		/*
 		 * Entries sit at three tabs. The block's own heading ("Ridge detection settings:") sits at two,
-		 * so it has to be skipped explicitly - stopping at it was the first version of this method and
-		 * it returned an EMPTY map, which silently restored every default instead of the saved values.
+		 * so it has to be skipped explicitly: stopping at it would return an EMPTY map, which silently
+		 * restores every default instead of the saved values.
 		 * Only a two-tab line ending in "settings:" may be skipped: the other two-tab line the writer
 		 * can emit here is "Every time step separately segmented.", and that one belongs to the outer
 		 * loop. Swallowing it would silently drop separateTimesteps.
@@ -5867,7 +5856,7 @@ private double parseNum(String s, double fallback){
 /**	Fit a settings-object report() block into the settings section's indentation.
 *	report() emits its heading at one tab and its entries at two; the settings section puts headings at
 *	two tabs ("Segmentation method:") and entries at three, so one tab is added to every non-blank line.
-*	Trailing blank lines are dropped, because TextPanel turns each into a visible empty row. */
+*	Trailing blank lines are dropped, because each would be an empty line in the report. */
 private String indentReport(String report){
 	if(report == null)	return "";
 	String [] lines = report.split("\n", -1);
