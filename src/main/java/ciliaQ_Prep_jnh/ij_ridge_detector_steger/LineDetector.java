@@ -326,15 +326,17 @@ public class LineDetector {
 							System.arraycopy(l1.intensity, pos, splitIntensity, 0, splitSize);
 						}
 
-						System.arraycopy(l1.angle, 0, keepAngle, 0, keepLength);
-						System.arraycopy(l1.angle, pos, splitAngle, 0, splitSize);
-
 						System.arraycopy(l1.width_l, 0, keepWidth_l, 0, keepLength);
 						System.arraycopy(l1.width_l, pos, splitWidth_l, 0, splitSize);
 
 						System.arraycopy(l1.width_r, 0, keepWidth_r, 0, keepLength);
 						System.arraycopy(l1.width_r, pos, splitWidth_r, 0, splitSize);
 					}
+
+					// CiliaQ-MOD (modification 20): the angles whatever doEstimateWidth. Before CiliaQ-MOD: inside the if above,
+					// so without width estimation both pieces had angles 0.
+					System.arraycopy(l1.angle, 0, keepAngle, 0, keepLength);
+					System.arraycopy(l1.angle, pos, splitAngle, 0, splitSize);
 
 					System.arraycopy(l1.col, 0, keepCol, 0, keepLength);
 					System.arraycopy(l1.col, pos, splitCol, 0, splitSize);

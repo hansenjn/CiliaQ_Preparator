@@ -144,9 +144,24 @@ public class FractionSettings {
 			return "fraction threshold: f = " + IJ.d2s(fGlobal, 3) + " is above the calibrated working"
 					+ " range 0.05-0.10 - on thin structures this can lose everything at once"
 					+ " (measured 123 objects -> 1 at f = 0.15)";
-		if (tileSize < 8)
+		if (local && tileSize < 8)
 			return "fraction threshold: a tile of " + tileSize + " px holds too few pixels for a"
 					+ " percentile to mean anything, so 8 px are used";
+		return null;
+	}
+
+	/**
+	 * @return null when the settings can work, otherwise why not.
+	 * CiliaQPrepMain.validateSettings refuses the run then
+	 * (a fraction that is not a number gives a threshold of NaN, which every voxel passes).
+	 * */
+	public String rejectionReason(boolean local) {
+		if (Double.isNaN(fGlobal) || (local && Double.isNaN(fLocal)))
+			return "fraction threshold: the fraction f is not a number";
+		double sp = local ? signalPercentileLocal : signalPercentileGlobal;
+		if (!(bgPercentile >= 0.0 && bgPercentile <= 100.0 && sp >= 0.0 && sp <= 100.0))
+			return "fraction threshold: the percentiles must lie between 0 and 100 (got background " + IJ.d2s(bgPercentile, 2)
+					+ ", signal " + IJ.d2s(sp, 2) + ")";
 		return null;
 	}
 

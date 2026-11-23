@@ -433,6 +433,8 @@ public class RidgeSettings implements Cloneable {
 		gd.setInsets(5, 20, 0);
 		gd.addCheckboxGroup(1, 4, new String[] { "Dark line", "Correct position", "Estimate width", "Extend line" },
 				new boolean[] { inst.darkLine, inst.correctPosition, inst.estimateWidth, inst.extendLine });
+		gd.setInsets(0, 20, 0);
+		gd.addMessage("'Correct position' works only with 'Estimate width' on - See Help.", help);
 		gd.setInsets(10, 0, 0);
 		gd.addMessage("--- In-focus and 3D ---", sub);
 		gd.addNumericField("Z-profile smoothing (px, 0 = automatic)", inst.zProfileSmoothing, 2);

@@ -241,6 +241,8 @@ public class SpotSettings {
 		if (!(scaleRatio > 1.0))
 			return "spot detection: the scale ratio must be above 1 (got " + IJ.d2s(scaleRatio, 2)
 					+ ") - at 1 the two Gaussians cancel and nothing is found";
+		if (!autoMinIntensity && Double.isNaN(minIntensity))
+			return "spot detection: the minimum spot intensity is not a number (use a number, or auto)";
 		return null;
 	}
 	

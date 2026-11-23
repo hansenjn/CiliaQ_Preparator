@@ -35,6 +35,8 @@ public class Processing {
 			IJ.run(thrChannel, "3D Edge and Symmetry Filter",
 					"alpha=" + pS.cannyAlpha + " radius=10 normalization=10 scaling=2 improved");
 			edges = Interpreter.getLastBatchModeImage(); //New in V0.2.0 where we use batchmode: we replaced WindowManager.getCurrentImage().
+			if (edges == null || edges == thrChannel) // as in doHysteresisThreshold: the command gave no image
+				throw new RuntimeException("3D Edge and Symmetry Filter returned no image - is the 3D ImageJ Suite installed?");
 			thrChannel.hide();
 			thrChannel.changes = false;
 	//		edges.hide();
@@ -61,6 +63,8 @@ public class Processing {
 	
 			IJ.run(edges, "3D Hysteresis Thresholding", "high=" + highThr + " low=" + lowThr);
 			bin = Interpreter.getLastBatchModeImage(); //New in V0.2.0 where we use batchmode: we replaced WindowManager.getCurrentImage().
+			if (bin == null || bin == edges) // the same check
+				throw new RuntimeException("3D Hysteresis Thresholding returned no image - is the 3D ImageJ Suite installed?");
 			bin.hide();
 			edges.changes = false;
 			edges.close();

@@ -184,6 +184,19 @@ public class ExpansionSettings {
 		return null;
 	}
 
+	/**
+	 * @return null when the custom thresholds are numbers, otherwise why not.
+	 * CiliaQPrepMain.validateSettings refuses the run then
+	 * (a threshold that is not a number gives an empty mask).
+	 * */
+	public String rejectionReason() {
+		if (customValueForLowThreshold() && Double.isNaN(customLowThr))
+			return "expansion: the threshold for the object extent is not a number";
+		if (SEED_HIGH.equals(seedSource) && customValueForSeedThreshold() && Double.isNaN(customSeedThr))
+			return "expansion: the core threshold for high-intensity seeds is not a number";
+		return null;
+	}
+
 	// ------------------------------------------------------------------ reporting
 
 	public String report() {

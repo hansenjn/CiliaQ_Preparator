@@ -170,7 +170,11 @@ public class Width {
 				s1_e = 0;
 				s2_s = 0;
 				s2_e = 0;
-				if (i > 0 && j < num_points - 1) {
+				/*	CiliaQ-MOD (modification 18): j is the first point after the gap that has a value, or num_points if
+				 *	none has, so "a point with a value follows the gap" is j < num_points, here and in the third branch.
+				 *	Before CiliaQ-MOD: j < num_points - 1, which handled a gap that ends right before the last point as a
+				 *	gap to the end: the last point's value was overwritten, or the gap was filled from 0. */
+				if (i > 0 && j < num_points) {
 					s = i;
 					e = j - 1;
 					m_s = master[(s - 1)];
@@ -199,7 +203,7 @@ public class Width {
 						s2_e = slave2[(s - 1)];
 						slave2[(e + 1)] = s2_e;
 					}
-				} else if (j < num_points - 1) {
+				} else if (j < num_points) {	//CiliaQ-MOD (modification 18), see above
 					s = 1;
 					e = j - 1;
 					m_s = master[(e + 1)];
@@ -511,6 +515,14 @@ public class Width {
 		for (i = 0; i < num_contours.getValue(); i++) {
 			cont = contours.get(i);
 			num_points = cont.num;
+			
+			/*	CiliaQ-MOD (modification 19): these arrays are reused from line to line and set only where a width is
+			 *	found. Without clearing, fill_gaps took the previous line's values into a line without any width, and
+			 *	Correct position shifted its points by another line's corrections. Before CiliaQ-MOD: not cleared. */
+			java.util.Arrays.fill(correct, 0, num_points, 0);
+			java.util.Arrays.fill(asymm, 0, num_points, 0);
+			java.util.Arrays.fill(grad_l, 0, num_points, 0);
+			java.util.Arrays.fill(grad_r, 0, num_points, 0);
 
 			for (j = 0; j < num_points; j++) {
 				px = cont.row[j];

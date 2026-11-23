@@ -112,10 +112,23 @@ public class PhansalkarSettings {
 	public String rangeWarning() {
 		if (radius < 2.0)
 			return "Phansalkar: radius " + IJ.d2s(radius, 2) + " px is smaller than any real"
-					+ " neighbourhood, so the local mean is essentially the pixel itself";
-		if (r == 0.0)
-			return "Phansalkar: r = 0 divides by zero in the k*((sd/r) - 1) term";
+						+ " neighbourhood, so the local mean is essentially the pixel itself";
 		return null;
+	}
+
+	/** @return null when the settings can work, otherwise why not.
+	 * CiliaQPrepMain.validateSettings refuses the run then
+	 * (a radius of 0, r = 0 or a constant that is not a number
+	 * gives a threshold of NaN or infinity everywhere).
+	 * */
+	public String rejectionReason() {
+	if (!(radius > 0.0))
+		return "Phansalkar: the radius must be above 0 px (got " + IJ.d2s(radius, 2) + ")";
+	if (!(r > 0.0 || r < 0.0))	// 0 or NaN
+		return "Phansalkar: r must not be 0 (the threshold divides by it; got " + IJ.d2s(r, 4) + ")";
+	if (Double.isNaN(k) || Double.isNaN(p) || Double.isNaN(q))
+		return "Phansalkar: k, p and q must be numbers";
+	return null;
 	}
 
 	// ------------------------------------------------------------------ reporting

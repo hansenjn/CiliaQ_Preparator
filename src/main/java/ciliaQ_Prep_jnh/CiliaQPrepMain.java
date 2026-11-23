@@ -12,7 +12,7 @@ package ciliaQ_Prep_jnh;
 * GNU General Public License for more details.
 * 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 22, 2026)
+* Date: September 29, 2019 (This Version: November 23, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -283,6 +283,7 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 			+ "\n"
 			+ "Fixed:\n"
 			+ "  - Canny 3D thresholds of type 'Custom Value' are applied and recorded.\n"
+			+ "  - The maximum projection of a 32-bit channel keeps negative values (they were set to 0 before).\n"
 			+ "\n"
 			+ "Help:\n"
 			+ "  - The Help buttons of the method dialogs open their pages in the CiliaQ wiki.";
@@ -370,6 +371,7 @@ public void run(String arg) {
 		gd.setInsets(10,0,0);	gd.addMessage("GENERAL SETTINGS:", HEADING_FONT);	
 		gd.setInsets(5,0,0);	gd.addChoice("Output image name: ", outputVariant, chosenOutputName);
 		gd.setInsets(5,0,0);	gd.addChoice("output number format", nrFormats, nrFormats[0]);
+		gd.setInsets(0,0,0);	gd.addMessage("Note: loaded preferences keep the number format saved in their file (from V0.2.1 on).", INSTRUCTIONS_FONT);
 		gd.setInsets(5,0,0);	gd.addCheckbox("Keep computer awake during processing", keepAwake);
 		
 		gd.addHelp("https://github.com/hansenjn/ciliaq/");
@@ -989,7 +991,9 @@ public void run(String arg) {
 		   				try {
 		   					segmentUsingCanny3D(tempImp, progress, cannySettings [c], procImp, channelIDs [c]); 				   				
 			   			}catch(Exception e) {
-			   				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Applying Canny 3D failed."
+			   				rethrowIfRunEnds(e);	// a cancelled macro ends the run, as in the catch after the task loop
+			   				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+			   						+ ": Applying Canny 3D failed. This image was not processed - no output was written."
 			   						+ "\nVerify that you have the 3D ImageJ Suite installed - for more information see"
 			   						+ "\nhttps://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ"
 			   						+ "\nIf you had the 3D ImageJ Suite installed, please report the following information as an issue on the CiliaQ github page or contact developer with the error information:"
@@ -1026,7 +1030,9 @@ public void run(String arg) {
 			   			try {
 				   			segmentUsingHysteresis(tempImp, progress, thresholdsHyst, procImp, channelIDs [c]);			   				
 			   			}catch(Exception e) {
-			   				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Hysteresis Thresholding failed."
+			   				rethrowIfRunEnds(e);	// a cancelled macro ends the run, as in the catch after the task loop
+			   				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+			   						+ ": Hysteresis Thresholding failed. This image was not processed - no output was written."
 			   						+ "\nVerify that you have the 3D ImageJ Suite installed - for more information see"
 			   						+ "\nhttps://github.com/hansenjn/CiliaQ/wiki/Installing-CiliaQ"
 			   						+ "\nIf you had the 3D ImageJ Suite installed, please report the following information as an issue on the CiliaQ github page or contact developer with the error information:"
@@ -1050,7 +1056,9 @@ public void run(String arg) {
 		   							ProgressReporter.ERROR);
 		   					break running;
 		   				}catch(Exception e) {
-		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Spot detection failed."
+		   					rethrowIfRunEnds(e);	// a cancelled macro ends the run, as in the catch after the task loop
+		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+		   							+ ": Spot detection failed. This image was not processed - no output was written."
 		   							+ "\nError message: " + e.getMessage()
 									+ "\nError localized message: " + e.getLocalizedMessage()
 									+ "\nError cause: " + e.getCause() 
@@ -1071,7 +1079,9 @@ public void run(String arg) {
 		   							ProgressReporter.ERROR);
 		   					break running;
 		   				}catch(Exception e) {
-		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Expansion from seeds failed."
+		   					rethrowIfRunEnds(e);	// a cancelled macro ends the run, as in the catch after the task loop
+		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+		   							+ ": Expansion from seeds failed. This image was not processed - no output was written."
 		   							+ "\nError message: " + e.getMessage()
 									+ "\nError localized message: " + e.getLocalizedMessage()
 									+ "\nError cause: " + e.getCause() 
@@ -1092,7 +1102,9 @@ public void run(String arg) {
 		   							ProgressReporter.ERROR);
 		   					break running;
 		   				}catch(Exception e) {
-		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": Ridge detection failed."
+		   					rethrowIfRunEnds(e);	// a cancelled macro ends the run, as in the catch after the task loop
+		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+		   							+ ": Ridge detection failed. This image was not processed - no output was written."
 		   							+ "\nError message: " + e.getMessage()
 									+ "\nError localized message: " + e.getLocalizedMessage()
 									+ "\nError cause: " + e.getCause() 
@@ -1635,8 +1647,96 @@ private void logImport(String line){
 	if(IJ.debugMode)	IJ.log(line);
 }
 
+/** New V0.2.1: the refusal of a settings file whose block lacks a line where it is expected (importProblem). */
+private static String missingLine(String block, String line){
+	return "The " + block + " settings have no \"" + line + "\" line where it is expected.\nNo preferences were loaded.";
+}
+
+/** New V0.2.1: the refusal of a settings file that ends before a line of a block (importProblem). */
+private static String endsBefore(String line){
+	return "The file ends before the \"" + line + "\" line: it may be cut off.\nNo preferences were loaded.";
+}
+
+/**
+ * Settings files written before V0.2.1 do not record whether the thresholds of a HYSTERESIS channel were
+ * determined for every time step separately. Those versions wrote the line "Every time step separately segmented." only
+ * for the plain threshold methods, so such a channel loaded with the default (not separately) without a word.
+ * 
+ * In GUI mode, a dialog asks for the setting, as CiliaQ does for parameters that older files lack. In a macro, a warning says
+ * that the default is used (Log, and the report's "Notes and errors"). With two CUSTOM thresholds nothing is determined
+ * per time step, so those channels are not asked.
+ * 
+ * New in V0.2.1 
+ * 
+ * @param version	the file's "Plug-in version", e.g. "V0.2.0"
+ * @return false if the dialog was cancelled
+ */
+private boolean askMissingTimeStepSetting(String version){
+	if(!versionBefore(version, 0, 2, 1)) {
+		return true;
+	}
+	
+	// Find channels that are using a hysteresis threshold
+	java.util.ArrayList<Integer> missing = new java.util.ArrayList<Integer>();
+	for(int c = 0; c < chosenAlgorithms.length; c++){
+		if(chosenAlgorithms [c].equals("HYSTERESIS threshold")
+				&& !(chosenLowAlg [c].equals(hystAlgorithms [0]) && chosenHighAlg [c].equals(hystAlgorithms [0]))){
+			missing.add(c);
+		}
+	}
+	if(missing.isEmpty()) {
+		return true;
+	}
+	
+	if(IJ.macroRunning() || GraphicsEnvironment.isHeadless()){
+		for(int c : missing){
+			addMacroWarning("channel " + channelIDs [c] + ": the settings file (" + version + ") does not record whether the"
+					+ " hysteresis thresholds were determined for every time step separately; files before V0.2.1 do not write it."
+					+ " The default is used: one threshold pair for all time steps.");
+		}
+		return true;
+	}
+	
+	GenericDialog gd = new GenericDialog(PLUGIN_NAME + " - missing setting");
+	gd.setInsets(0,0,0);	gd.addMessage("ATTENTION", SUB_HEADING_FONT);
+	gd.setInsets(0,0,0);	gd.addMessage("You loaded settings from a file created with " + PLUGIN_NAME + " " + version + "."
+			+ "\nFiles from versions before V0.2.1 do not record whether hysteresis thresholds were determined"
+			+ "\nfor every time step separately. Define it here. It matters only for time-lapse images.", INSTRUCTIONS_FONT);
+	gd.setInsets(20,0,0);	gd.addMessage("Define missing parameter:", SUB_HEADING_FONT);
+	for(int c : missing){
+		gd.setInsets(0,0,0);	gd.addCheckbox("Channel " + channelIDs [c] + ": threshold every time step independently", separateTimesteps [c]);
+	}
+	gd.showDialog();
+	if(gd.wasCanceled()) {
+		return false;
+	}
+	for(int c : missing){
+		separateTimesteps [c] = gd.getNextBoolean();
+	}
+	return true;
+}
+
+/**
+ * New in V0.2.1: true if a version text such as "V0.2.0" is before major.minor.patch. A text without a readable number
+ * counts as before: such a file cannot be shown to hold the newer settings.
+ */
+private static boolean versionBefore(String version, int major, int minor, int patch){
+	int [] than = {major, minor, patch};
+	String [] parts = (version == null ? "" : version.replaceAll("[^0-9.]", "")).split("\\.");
+	try{
+		for(int i = 0; i < than.length; i++){
+			int v = i < parts.length ? Integer.parseInt(parts [i]) : 0;
+			if(v != than [i])	return v < than [i];
+		}
+		return false;
+	}catch(NumberFormatException e){
+		return true;
+	}
+}
+
 /**
  * Import settings from existing file
+
  * Updated for V0.2.0 to handle headless loading
  */
 private boolean importSettings() {
@@ -1696,6 +1796,11 @@ private boolean importSettings() {
 				boolean formatKnown = false;
 				for(int i = 0; i < nrFormats.length; i++){
 					if(line.contains(nrFormats [i])){
+						if(showGUIs && !nrFormats [i].equals(ChosenNumberFormat)){
+							// New in V0.2.1: a macro names it in warnKeysIgnoredBySettingsFile; the dialog says it in a line under the choice
+							IJ.log(PLUGIN_NAME + ": the settings file's number format (" + nrFormats [i] 
+									+ ") replaces the one chosen in the dialog (" + ChosenNumberFormat + ").");
+						}
 						setNumberFormat(nrFormats [i]);
 						formatKnown = true;
 					}
@@ -1739,7 +1844,7 @@ private boolean importSettings() {
 			}
 		}					
 	}catch (IOException e) {
-		importProblem(settingsFile, "Problem with loading preferences");
+		importProblem(settingsFile, "The file could not be read. No preferences were loaded.");
 		e.printStackTrace();
 		return false;
 	}
@@ -1759,6 +1864,7 @@ private boolean importSettings() {
 	int actualC = -1;
 	String tempString;
 	boolean footerRead = false;	// New in V0.2.1: Checking that the file's last section ("Plug-in version:") was read, see below
+	String fileVersion = null;	// New in V0.2.1: the version in that section, for askMissingTimeStepSetting
 	try (BufferedReader br = new BufferedReader(new FileReader(settingsFile))) {
 		String line = "";							
 		reading: while(true){
@@ -1865,9 +1971,9 @@ private boolean importSettings() {
 						
 						cannySettings [actualC] = ProcessSettings.initDefault();
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem with Gauss Sigma."); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("Gauss sigma")); truncated = true; break reading;}
 						if(!line.contains("Gauss sigma:")) {
-							importProblem(settingsFile,"Gauss not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile,missingLine("Canny 3D", "Gauss sigma"));
 							return false;
 						}
 						tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1876,9 +1982,9 @@ private boolean importSettings() {
 						logImport("C" + actualC + ": Gauss " + cannySettings [actualC].getGaussSigma());
 						
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem with Canny alpha."); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("Canny alpha")); truncated = true; break reading;}
 						if(!line.contains("Canny alpha:")) {
-							importProblem(settingsFile,"Alpha not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile,missingLine("Canny 3D", "Canny alpha"));
 							return false;
 						}
 						tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1887,9 +1993,9 @@ private boolean importSettings() {
 						logImport("C" + actualC + ": Alpha " + cannySettings [actualC].getCannyAlpha());
 						
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem with low threshold method."); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("Low threshold method")); truncated = true; break reading;}
 						if(!line.contains("Low threshold method")) {
-							importProblem(settingsFile,"LowThr method not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile,missingLine("Canny 3D", "Low threshold method"));
 							return false;
 						}
 						
@@ -1905,9 +2011,9 @@ private boolean importSettings() {
 						
 						if(cannySettings [actualC].getLowThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){importProblem(settingsFile, "Reading problem with manually selected low threshold."); truncated = true; break reading;}
+							if(line == null){importProblem(settingsFile, endsBefore("Manually selected low threshold")); truncated = true; break reading;}
 							if(!line.contains("Manually selected low threshold:")){
-								importProblem(settingsFile, "Could not find manual lowThr in Canny settings - no preferences loaded!");
+								importProblem(settingsFile, missingLine("Canny 3D", "Manually selected low threshold"));
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1917,9 +2023,9 @@ private boolean importSettings() {
 						logImport("C" + actualC + ": low Thr " + cannySettings [actualC].getLowThresholdAlgorithm());
 						
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem with high threshold method."); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("High threshold method")); truncated = true; break reading;}
 						if(!line.contains("High threshold method")) {
-							importProblem(settingsFile, "HiThr method not found in Canny settings - no preferences loading!");
+							importProblem(settingsFile, missingLine("Canny 3D", "High threshold method"));
 							return false;
 						}
 
@@ -1935,9 +2041,9 @@ private boolean importSettings() {
 						
 						if(cannySettings [actualC].getHighThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){importProblem(settingsFile, "Reading problem with manually selected high threshold."); truncated = true; break reading;}
+							if(line == null){importProblem(settingsFile, endsBefore("Manually selected high threshold")); truncated = true; break reading;}
 							if(!line.contains("Manually selected high threshold:")){
-								importProblem(settingsFile, "Could not find manual highThr in Canny settings - no preferences loaded!");
+								importProblem(settingsFile, missingLine("Canny 3D", "Manually selected high threshold"));
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1951,9 +2057,9 @@ private boolean importSettings() {
 						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
 						
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem"); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("Low threshold method")); truncated = true; break reading;}
 						if(!line.contains("Low threshold method")) {
-							importProblem(settingsFile, "LowThr method not found in Hysteresis settings - no preferences loading!");
+							importProblem(settingsFile, missingLine("hysteresis", "Low threshold method"));
 							return false;
 						}
 						
@@ -1970,9 +2076,9 @@ private boolean importSettings() {
 						logImport("C" + actualC + ": Low Thr method" + chosenLowAlg [actualC]);
 						if(chosenLowAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){importProblem(settingsFile, "Reading problem with manually selected low threshold."); truncated = true; break reading;}
+							if(line == null){importProblem(settingsFile, endsBefore("Manually selected low threshold")); truncated = true; break reading;}
 							if(!line.contains("Manually selected low threshold:")){
-								importProblem(settingsFile, "Could not find manual lowThr in Hysteresis settings - no preferences loaded!");
+								importProblem(settingsFile, missingLine("hysteresis", "Manually selected low threshold"));
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
@@ -1982,9 +2088,9 @@ private boolean importSettings() {
 						}
 						
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem with high threshold method."); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("High threshold method")); truncated = true; break reading;}
 						if(!line.contains("High threshold method")) {
-							importProblem(settingsFile, "HiThr method not found in Hysteresis settings - no preferences loading!");
+							importProblem(settingsFile, missingLine("hysteresis", "High threshold method"));
 							return false;
 						}
 						
@@ -2001,9 +2107,9 @@ private boolean importSettings() {
 						logImport("C" + actualC + ": High Thr method" + chosenHighAlg [actualC]);
 						if(chosenHighAlg [actualC].equals(hystAlgorithms[0])) {
 							line = br.readLine();
-							if(line == null){importProblem(settingsFile, "Reading problem with manually selected high threshold."); truncated = true; break reading;}
+							if(line == null){importProblem(settingsFile, endsBefore("Manually selected high threshold")); truncated = true; break reading;}
 							if(!line.contains("Manually selected high threshold:")){
-								importProblem(settingsFile, "Could not find manual highThr in Hysteresis settings - no preferences loaded!");
+								importProblem(settingsFile, missingLine("hysteresis", "Manually selected high threshold"));
 								return false;
 							}
 							tempString = line.substring(line.lastIndexOf("	")+1);
@@ -2016,7 +2122,7 @@ private boolean importSettings() {
 							
 						}else {
 							line = br.readLine();	
-							if(line == null){importProblem(settingsFile, "Reading problem with stack method"); truncated = true; break reading;}
+							if(line == null){importProblem(settingsFile, endsBefore("Stack processing")); truncated = true; break reading;}
 							String smMatch = matchStackMethod(line);
 							if(smMatch != null) {
 								chosenStackMethods [actualC] = smMatch;
@@ -2031,9 +2137,9 @@ private boolean importSettings() {
 					}else if(line.contains("CUSTOM threshold")) {
 						chosenAlgorithms [actualC] = algorithm [18];
 						line = br.readLine();
-						if(line == null){importProblem(settingsFile, "Reading problem with CUSTOM threshold value"); truncated = true; break reading;}
+						if(line == null){importProblem(settingsFile, endsBefore("Custom threshold value")); truncated = true; break reading;}
 						if(!line.contains("Custom threshold value:")){
-							importProblem(settingsFile, "Could not find custom threshold value in settings - no preferences loaded!");
+							importProblem(settingsFile, missingLine("CUSTOM threshold", "Custom threshold value"));
 							return false;
 						}
 						tempString = line.substring(line.lastIndexOf("	")+1);
@@ -2057,7 +2163,7 @@ private boolean importSettings() {
 						
 						line = br.readLine();	
 						if (line == null) {
-							importProblem(settingsFile, "Reading problem with stack method.");
+							importProblem(settingsFile, endsBefore("Stack processing"));
 							truncated = true;
 							break reading;
 						}
@@ -2153,7 +2259,7 @@ private boolean importSettings() {
 							es.lowThrAlgorithm = matchName(lowAlg, ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms);
 						if (es.lowThrAlgorithm == null) {
 							importProblem(settingsFile, "The file names a threshold method this version does not know: "
-									+ lowAlg + "\nNo preferences were loaded.");
+									+ lowAlg + ". No preferences were loaded.");
 							return false;
 						}
 						es.customLowThr = blockDouble(kv, "Manually selected threshold", es.customLowThr);
@@ -2174,7 +2280,7 @@ private boolean importSettings() {
 							es.seedThrAlgorithm = matchName(seedAlg, ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms);
 						if (es.seedThrAlgorithm == null) {
 							importProblem(settingsFile, "The file names a threshold method this version does not know: "
-									+ seedAlg + "\nNo preferences were loaded.");
+									+ seedAlg + ". No preferences were loaded.");
 							return false;
 						} // New in V0.2.1
 						es.customSeedThr = blockDouble(kv, "High core seed - manually selected seed threshold",
@@ -2216,12 +2322,13 @@ private boolean importSettings() {
 			
 			if(line.contains("Plug-in version:")) {
 				footerRead = true;
-				String version = line.substring(line.lastIndexOf("V"));
-				IJ.log("Loaded settings stem from a CiliaQ Preparator run with Version " + version + ".");
+				fileVersion = line.substring(line.lastIndexOf("V"));
+				logImport("Loaded settings stem from a CiliaQ Preparator run with Version " + fileVersion + ".");
+
 
 				// V0.2.0: note when settings come from a different version than this build.
-				if(!version.equals("V" + PLUGIN_VERSION)){
-					IJ.log(PLUGIN_NAME + ": settings were saved by version " + version
+				if(!fileVersion.equals("V" + PLUGIN_VERSION)){
+					IJ.log(PLUGIN_NAME + ": settings were saved by version " + fileVersion
 						+ ", this plugin is V" + PLUGIN_VERSION
 						+ ". Settings that did not exist in the saved version keep their defaults.");
 				}
@@ -2231,8 +2338,8 @@ private boolean importSettings() {
 				 * For downwards compatibility, some settings need to be adjusted when reading in an analysis from older versions.
 				 * This is done here.
 				 */
-				if(version.equals("V0.1.1") || version.equals("V0.1.0") || version.equals("V0.0.6") || version.equals("V0.0.5") || version.equals("V0.0.4") || version.equals("V0.0.3") || version.equals("V0.0.2")) {
-					IJ.log("Detected that setting loaded stems from an older CiliaQ Preparator version (Version " + version + ")");
+				if(fileVersion.equals("V0.1.1") || fileVersion.equals("V0.1.0") || fileVersion.equals("V0.0.6") || fileVersion.equals("V0.0.5") || fileVersion.equals("V0.0.4") || fileVersion.equals("V0.0.3") || fileVersion.equals("V0.0.2")) {
+					logImport("Detected that setting loaded stems from an older CiliaQ Preparator version (Version " + fileVersion + ")");
 					for(int c = 0; c < chosenAlgorithms.length; c++) {
 						if(chosenAlgorithms [c].equals(algorithm [17])) {
 							String tempLowAlg = cannySettings [c].getLowThresholdAlgorithm();
@@ -2256,10 +2363,10 @@ private boolean importSettings() {
 								 */
 								cannySettings [c].setLowThresholdAlgorithm(tempHighAlg);
 								cannySettings [c].setHighThresholdAlgorithm(tempLowAlg);
-								IJ.log("C" + c + ": low Thr and high Thr methods were swapped to reproduce performance of the older version of CiliaQ (" + version + ") for which the loaded setting was used"
-										+ " (for more details see release notes at https://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2 ):");
-								IJ.log("C" + c + ": adjusted low Thr method:" + cannySettings [c].getLowThresholdAlgorithm());
-								IJ.log("C" + c + ": adjusted high Thr method:" + cannySettings [c].getHighThresholdAlgorithm());
+								IJ.log(PLUGIN_NAME + ": channel " + channelIDs [c] + ": low and high threshold methods of Canny 3D swapped to reproduce"
+										+ " the results of " + fileVersion + " (now low " + cannySettings [c].getLowThresholdAlgorithm()
+										+ ", high " + cannySettings [c].getHighThresholdAlgorithm() + "; see the release notes:"
+										+ " https://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2).");
 							}else if(tempLowAlg.equals(ProcessSettings.thrAlgorithms[0]) && tempHighAlg.equals(ProcessSettings.thrAlgorithms[0])) {
 								/**
 								 * Nothing needs to be swapped since low and high Thr values were correctly entered and applied
@@ -2280,7 +2387,7 @@ private boolean importSettings() {
 									 * This setting cannot be reproduced with CiliaQ Preparator of this version since this whole procedure is not reproducible. 
 									 */
 								}else {
-									/** 
+									/**
 									 * High was set custom and value entered, low was other, value 0.0
 									 * Old version consequence: low is custom, low value 0.0, high is SomeAlg, high value someValueButNotStored
 									 * Application:
@@ -2289,18 +2396,12 @@ private boolean importSettings() {
 									 * Outcome unpredictable
 									 * Final consequence, unpredictable
 									 * This setting cannot be reproduced with CiliaQ Preparator of this version since this whole procedure is not reproducible. 
-									 */									
+									 */
 								}
-								IJ.log("CiliaQ_Preparator cannot finally import this setting since it is from an older CiliaQ Preparator version (" + version + ") and running"
-										+ "\nCiliaQ_Preparator version " + version + " with this setting was affected by a bug that has been fixed in version V0.1.2."
-										+ "\nYou may only reproduce this setting by running your file in CiliaQ Preparator version " + version + ", which can be downloaded at"
-										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + version.toLowerCase() + " and manually installed to your FIJI/ImageJ."
-										+ "\nRead more about the bug at the release notes of CiliaQ Preparator version V0.1.2:"
-										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2");
-								importProblem(settingsFile, "CiliaQ_Preparator cannot import this setting since it is from an older CiliaQ Preparator version (" + version + ") and running"
-										+ "\nCiliaQ_Preparator version " + version + " with this setting was affected by a bug that has been fixed in version V0.1.2."
-										+ "\nYou may only reproduce this setting by running your file in CiliaQ Preparator version " + version + ", which can be downloaded at"
-										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + version.toLowerCase() + " and manually installed to your FIJI/ImageJ."
+								importProblem(settingsFile, "CiliaQ_Preparator cannot import this setting since it is from an older CiliaQ Preparator version (" + fileVersion + ") and running"
+										+ "\nCiliaQ_Preparator version " + fileVersion + " with this setting was affected by a bug that has been fixed in version V0.1.2."
+										+ "\nYou may only reproduce this setting by running your file in CiliaQ Preparator version " + fileVersion + ", which can be downloaded at"
+										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/" + fileVersion.toLowerCase() + " and manually installed to your FIJI/ImageJ."
 										+ "\nRead more about the bug at the release notes of CiliaQ Preparator version V0.1.2:"
 										+ "\nhttps://github.com/hansenjn/CiliaQ_Preparator/releases/tag/v0.1.2");
 								return false;
@@ -2308,7 +2409,13 @@ private boolean importSettings() {
 						}						
 					}
 				}
-			}
+				
+				// New in V0.2.1: files before V0.2.1 do not record "every time step separately" for hysteresis
+				if(!askMissingTimeStepSetting(fileVersion)){
+					return false;
+				}
+			}			
+
 			
 			//New from V0.2.0 check for version.
 			if(line.contains("ImageJ version:")){
@@ -2333,10 +2440,23 @@ private boolean importSettings() {
 	}catch (Exception e) {
 		// In a macro, importProblem ends the macro (IJ.error throws "Macro canceled"): pass it on, not a second message
 		rethrowIfRunEnds(e);
-		importProblem(settingsFile, "Problem with loading preferences (possibly a malformed or truncated settings file).");
+		if(e instanceof IllegalArgumentException){
+			// a value that is no number (parseNum, Double.parseDouble), or a switch that is neither true nor false (blockBoolean)
+			importProblem(settingsFile, "The file holds a value this version cannot read:\n" + e.getMessage()
+					+ "\nNo preferences were loaded.\n"
+					+ "\nMore details:"
+					+ "\nLocalized message: " + e.getLocalizedMessage()
+					+ "\nCause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + stackTraceToString(e));
+			return false;
+		}
+		importProblem(settingsFile, "The file could not be read (it may be malformed or cut off). No preferences were loaded.");
 		e.printStackTrace();
 		return false;
 	}
+
+
 
 	/*	New V0.2.1: one line for the whole file, instead of one per setting (those only in debug mode, see logImport). */
 	String loaded = "";
@@ -3060,6 +3180,14 @@ private boolean validateSettings(){
 			// New in V0.2.1
 			refuse("Channel " + channelIDs [c] + ": the CUSTOM threshold is not a number.", null);
 		}
+		
+		if(chosenAlgorithms [c].equals("HYSTERESIS threshold")){
+			// New in V0.2.1
+			if(chosenLowAlg [c].equals(hystAlgorithms [0]) && Double.isNaN(customLowThr [c]))
+				refuse("Channel " + channelIDs [c] + ": the hysteresis low threshold is not a number.", null);
+			if(chosenHighAlg [c].equals(hystAlgorithms [0]) && Double.isNaN(customHighThr [c]))
+				refuse("Channel " + channelIDs [c] + ": the hysteresis high threshold is not a number.", null);
+		}
 
 		/*	CUSTOM threshold with the default value is almost always an oversight. Changed V0.2.1: the text said every
 		 *	voxel ABOVE zero is kept; a voxel is removed only if value < threshold, so at 0 every voxel stays, and in
@@ -3102,10 +3230,17 @@ private boolean validateSettings(){
 			reject = spotSettings [c].rejectionReason();
 		}else if(chosenAlgorithms [c].equals(EXPANSION_SEEDS) && expansionSettings [c] != null){
 			String src = expansionSettings [c].seedSource;
-			if(src.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_SPOT))
+			reject = expansionSettings [c].rejectionReason();
+			if(reject == null && src.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_SPOT))
 				reject = expansionSettings [c].toSpotSettings().rejectionReason();
-			else if(src.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE))
+			else if(reject == null && src.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE))
 				reject = expansionSettings [c].toRidgeSettings().settingsRejectionReason();
+		}else if(chosenAlgorithms [c].equals("CANNY 3D") && cannySettings [c] != null){
+			reject = cannySettings [c].rejectionReason();
+		}else if(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c]) && phansalkarSettings [c] != null){
+			reject = phansalkarSettings [c].rejectionReason();
+		}else if(ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c]) && fractionSettings [c] != null){
+			reject = fractionSettings [c].rejectionReason(ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.LOCAL.equals(chosenAlgorithms [c]));
 		}
 		if(reject != null){
 			refuse("Channel " + channelIDs [c] + ": " + reject + ".", null);
@@ -3169,7 +3304,8 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 				|| chosenAlgorithms [c].equals(SPOT_DETECTION) || ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c]));
 		
 		if(usesStackChoice && imp.getNSlices() > 1 && chosenStackMethods [c].equals(STACK_NO_STACK)){
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": stack handling is set to '"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c]
+				+ ": stack handling is set to '"
 				+ STACK_NO_STACK + "' but the image has " + imp.getNSlices()
 				+ " slices. " + (ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c])
 					? "The FRACTION thresholds will be taken from the whole stack."
@@ -3182,14 +3318,16 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 			 *	hysteresis via the 3D Hysteresis Thresholding plugin, expansion via 26-connected
 			 *	growth - so they need one threshold pair for the whole stack. A different threshold
 			 *	per slice would cut objects at slice boundaries. Say so rather than pool silently. */
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": stack handling '" + STACK_PER_SLICE
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+				+ ": stack handling '" + STACK_PER_SLICE
 				+ "' cannot be used with '" + chosenAlgorithms [c] + "', which needs one threshold"
 				+ " for the whole stack because it connects objects across slices."
 				+ " The pooled-histogram threshold is used for this channel instead.",
 				ProgressReporter.NOTIFICATION);
 		}else if(usesStackChoice && imp.getNSlices() == 1 && (imp.getNFrames() == 1 || separateTimesteps [c])
 				&& !chosenStackMethods [c].equals(STACK_NO_STACK)){	// one slice, and one frame or frames thresholded separately: every stack handling is the same
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the image is a single slice, so"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+				+ ": the image is a single slice, so"
 				+ " stack handling '" + chosenStackMethods [c] + "' has no effect.",
 				ProgressReporter.NOTIFICATION);
 		}
@@ -3198,14 +3336,16 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 		 *	slice of the first time step and applies it to every time step. */
 		if(usesStackChoice && imp.getNFrames() > 1 && !separateTimesteps [c] && chosenStackMethods [c].equals(STACK_NO_STACK)
 				&& !ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c])){
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": stack handling is '" + STACK_NO_STACK + "' and the time steps are"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] + ": stack handling is '" + STACK_NO_STACK
+				+ "' and the time steps are"
 				+ " thresholded together, so the threshold is taken from the first slice of the first time step and applied to"
 				+ " every time step. '" + STACK_POOLED + "' and the maximum-intensity projection pool all time steps.",
 				ProgressReporter.NOTIFICATION);
 		}
 		
 		if(separateTimesteps [c] && imp.getNFrames() == 1){
-			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": 'threshold every time step"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+				+ ": 'threshold every time step"
 				+ " independently' is on but the image has a single frame.",
 				ProgressReporter.NOTIFICATION);
 		}
@@ -3213,8 +3353,8 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 	if(imp.getBitDepth() == 8){
 		for(int c = 0; c < channelIDs.length; c++){
 			if(divideBackground [c]){
-				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the image is 8-bit and"
-					+ " divide-by-background produces 32-bit ratios; the dynamic range"
+				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] 
+					+ ": the image is 8-bit and divide-by-background produces 32-bit ratios; the dynamic range"
 					+ " available for thresholding is very small.", ProgressReporter.NOTIFICATION);
 			}
 		}
@@ -4696,7 +4836,7 @@ private ImagePlus expandFromSeeds(ImagePlus channelImp, ImagePlus origImp, boole
 		}			
 		String zNote = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.stackNote(origImp, es.toRidgeSettings());
 		if(zNote != null){
-			progress.notifyMessage("Expansion seeds: " + zNote, ProgressReporter.NOTIFICATION);
+			progress.notifyMessage("Channel " + channelWriteImp + ": ridge seeds: " + zNote, ProgressReporter.NOTIFICATION);
 			tp1.append("	NOTE	ridge seeds: " + zNote);
 		}
 		if(!seedPerFrame){
@@ -4773,7 +4913,8 @@ private ImagePlus expandFromSeeds(ImagePlus channelImp, ImagePlus origImp, boole
 			}
 
 			ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.Result rr =
-					ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rs, progress);
+					ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rs, progress,
+							"Channel " + channelWriteImp + ": ridge seeds" + (nFrames > 1 ? ", time step " + (t+1) : ""));
 			if(rr.failedPlanes > 0){
 				tp1.append("	Ridge seeds, frame " + (t+1) + ": ridge detection FAILED on " + rr.failedPlanes + " plane(s), counted as empty");
 			}
@@ -5078,7 +5219,8 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 				rsT.darkLine = false;
 			}
 			ImagePlus selectedImp = getSelectedTimepoints(detectImp, t+1, t+1, false);
-			res [t] = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rsT, progress);
+			res [t] = ciliaQ_Prep_jnh.ridge_detection.RidgeSegmenter.detect(selectedImp, rsT, progress,
+				"Channel " + channelWriteImp + (channelImp.getNFrames() > 1 ? ", time step " + (t+1) : ""));
 			maxObjects = Math.max(maxObjects, res [t].nObjects);
 			anyWrapped = anyWrapped || res [t].wrapped;
 			failedPlanes += res [t].failedPlanes;
@@ -5912,7 +6054,7 @@ private String readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_
 	rs.minLength = blockDouble(kv, "Minimum filament length", rs.minLength);
 	String maxL = blockValue(kv, "Maximum filament length");
 	rs.maxLength = (maxL == null || maxL.contains("unlimited")) ? 0.0
-			: parseNum(maxL, rs.maxLength);
+			: parseNum(maxL, "Maximum filament length");
 	rs.resolveCrossings = blockBoolean(kv, "Resolve crossings", rs.resolveCrossings);
 	rs.darkLine = blockBoolean(kv, "Dark line", rs.darkLine);
 
@@ -6038,25 +6180,29 @@ private String blockValue(java.util.HashMap<String,String> kv, String keyPrefix)
 
 private double blockDouble(java.util.HashMap<String,String> kv, String keyPrefix, double fallback){
 	String v = blockValue(kv, keyPrefix);
-	return v == null ? fallback : parseNum(v, fallback);
+	return v == null ? fallback : parseNum(v, keyPrefix);
 }
 
+/**	A missing line keeps the default. A value other than true or false refuses the file (importSettings), as a number
+ * 	that cannot be read does (parseNum). */
 private boolean blockBoolean(java.util.HashMap<String,String> kv, String keyPrefix, boolean fallback){
 	String v = blockValue(kv, keyPrefix);
-	return v == null ? fallback : Boolean.parseBoolean(v.trim());
+	if(v == null)	return fallback;
+	if(v.trim().equalsIgnoreCase("true"))	return true;
+	if(v.trim().equalsIgnoreCase("false"))	return false;
+	throw new IllegalArgumentException("\"" + keyPrefix + "\" is " + v.trim() + ", not true or false");
 }
 
 /**	Decimal-comma tolerant parse, matching what the rest of the reader does by hand at every
- * 	call site. A malformed value returns the fallback rather than aborting the whole load. */
-private double parseNum(String s, double fallback){
-	if(s == null)	return fallback;
+ * 	call site. A value that is no number refuses the file (importSettings), as in the lines of the other methods.
+ * 	@param setting	the setting, named in the refusal */
+private double parseNum(String s, String setting){
 	s = s.trim();
 	if(s.contains(",") && !s.contains("."))	s = s.replace(",", ".");
 	try{
 		return Double.parseDouble(s);
 	}catch(NumberFormatException e){
-		IJ.log(PLUGIN_NAME + ": could not read the number '" + s + "', keeping " + fallback);
-		return fallback;
+		throw new IllegalArgumentException("\"" + setting + "\" is " + s + ", not a number");
 	}
 }
 

@@ -58,7 +58,7 @@ so the code was copied in and corrected here. See "Modifications" below. The ven
 copy also contained four further bugs. Two of them change which lines are detected and are
 fixed as modifications 8 and 9. The third caused an ArrayIndexOutOfBoundsException for sigma
 values below 0.7 and is fixed as modification 11. The fourth zeroed the responses of long lines
-and is fixed as modification 12. Modifications 14 and 15 fix three more, found in a later review.
+and is fixed as modification 12. Modifications 14 to 21 fix nine additional bugs.
 
 ## Modifications made to the original
 
@@ -71,8 +71,12 @@ and is fixed as modification 12. Modifications 14 and 15 fix three more, found i
   zeroed accumulated response values on lines exceeding the initial buffer size; the fix restores
   correct responses and **changes the output** wherever such reallocation occurred.
 - Modification 13 makes five steps faster on noisy images and leaves the computed lines unchanged.
-- Modification 14 returns each line once (without overlap resolution one line per plane came out twice) and
-  **changes the output** there; modification 15 fixes two junction details of the overlap resolution.
+- Modification 14 returns each line once (without overlap resolution one line per plane came out twice) and 
+  **changes the output**; modification 15 fixes two junction details of the overlap resolution.
+- Modification 16 returns every junction found (one kind was dropped) and **changes the output**.
+- Modifications 17 to 19 fix three bugs of the line extension and the width estimation and **change the output** slightly.
+- Modification 20 keeps the angles of split lines without width estimation (no change in CiliaQ's output).
+- Modification 21 gives very short lines no joint in the overlap resolution and **changes the output**.
 
 Every modified file carries an inline comment marked `// CiliaQ-MOD:` at the point of change.
 
@@ -226,11 +230,59 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    being changed while in the set. The first changes the output only where such keys collided; the second does not
    change it (tested with all identity hashes equal).
 
+16. **Every junction returned** (`Link.java`) — **changes the output** where the first line of a plane runs into
+   itself. The final loop of `compute_contours` read the whole pre-allocated junction array and skipped its empty
+   padding by `cont1 == 0 && cont2 == 0`. A line that runs into itself gets a junction with both set to its own index,
+   so the test also dropped every such junction of line 0, the line traced first (from the strongest point). The line
+   was still split there, but `fixJunctions` and the overlap resolution never saw the junction. Now the loop reads the
+   junctions found, `[0, num_junc)`, as Steger's C code returns them and as modification 14 does for the lines.
+   In a test (5 stacks, 3 z methods each) no such junction occurred in the cilia stacks; in stacks of coiled
+   filaments there were 1 to 4 per run, and 3 of these 6 runs changed: 3 or 4 voxels fewer, or one object more.
+
+17. **Junction index after a start extension into the same line** (`Link.java`) — **changes the output** in rare
+   cases. When the extension at the start of a line runs into that same line, its points have just been moved up by
+   the inserted points, but the new junction took the index from before the move, so the split cut the line too
+   early. The line's other junctions are shifted ("Adapt indices of the previously found junctions"); this one now
+   is too.
+
+18. **Width gaps up to the last point** (`Width.java`, `fill_gaps`) — **changes the output**. Points without a width
+   are filled from their neighbours. The test for "a point with a width follows the gap" was `j < num_points - 1`,
+   so a gap that ended right before the last point was handled as a gap to the end: the last point's width was
+   overwritten by the one before the gap, or, for a gap from the first point, the widths were filled from 0. Now
+   `j < num_points`.
+
+19. **Width arrays cleared for every line** (`Width.java`, `compute_line_width`) — **changes the output**. The arrays
+   of corrections, asymmetries and gradients are allocated once, reused from line to line and set only where a
+   width is found. In a line without any width, the gap filling took the previous line's values, so *Correct
+   position* shifted its points by another line's corrections. They are now cleared for each line.
+
+20. **Angles of split lines kept** (`LineDetector.java`, `addAdditionalJunctionPointsAndLines`) — no change in
+   CiliaQ's output. The angles of the two pieces were copied only with *Estimate width* on; without it they were 0.
+   CiliaQ reads no angles after this step.
+
+21. **No joint at very short lines** (`SlopeOverlapResolver.java`, `findLongestPath`) — **changes the output**. The
+   direction in which a line arrives at a junction is measured from its end into the line. An end within 2 px of
+   the start was taken for the start, so a line whose two ends lie within 2 px of each other took no joint at its
+   end (the direction had no length, a bend of 180°) but one at its start. Such a line now takes no joint at either
+   end. Allowing both ends instead lets a 2–3 px fragment in a crossing take a joint at each end, each bent up to
+   60°, and so bridge two filaments; in a test it joined two filaments at a crossing.
+
+Tested, each change alone against modification 16, on a cilia stack and a stack of crossing filaments (z methods, 
+in-focus, and classic): 17 changed at most 33 voxels and one object, 18 and 19 up to a few thousand voxels and
+three objects; 21 swapped a few short pieces in a cilia stack (86 → 81 objects) and changed a few objects in
+another, where the crossing itself is resolved as before.
+
+Besides these, some comments were polished (wording only, no change to the code).
+
 ### Scope / what was NOT changed
 
-- The detection, width and position-correction mathematics are untouched. Linking is unchanged
-except for the junction sort (8), the response copy (12) and the end of the line list (14); overlap resolution was rebuilt (9) and can take the line width (10);
+- The detection, width and position-correction mathematics are untouched; the width step fills its gaps up to the
+last point (18) and starts every line with cleared arrays (19). Linking is unchanged except for the junction sort
+(8), the response copy (12), the ends of the line and junction lists (14, 16) and the index after a start extension
+(17); the splitting keeps the angles (20); overlap resolution was rebuilt (9), can take the line width (10) and gives
+very short lines no joint (21);
 the search-line buffer fits small sigmas (11); five slow steps are faster, with the same output (13).
+
 
 ## How CiliaQ sets the thresholds it passes in (not a modification of this code)
 
@@ -276,8 +328,8 @@ Not a bug; the code comment now says why (`CiliaQ-MOD`, comment only).
 On 2026-10-29, we submitted a **pull request** (determinism fixes, https://github.com/thorstenwagner/ij-ridgedetection/pull/42)
 with the ordering/determinism changes listed under "Modifications made to the original" above.
 
-Modifications 8, 9, 11, 12, 14 and 15 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1;
-those of 11, 12, 14 and 15 are in the upstream code this copy was taken from. A second pull request waits until #42 is accepted, since
+Modifications 8, 9, 11, 12 and 14 to 21 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1;
+those of 11, 12 and 14 to 21 are in the upstream code this copy was taken from. A second pull request waits until #42 is accepted, since
 the plugin is listed as unmaintained.
 
 ## Maintenance note

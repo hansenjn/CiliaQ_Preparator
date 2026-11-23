@@ -160,8 +160,11 @@ public class RidgeSegmenter {
 	 * Detect filaments in every plane of a single-channel, single-timepoint image and link them in z.
 	 * Writes nothing: the caller decides the output bit depth once nObjects is known, which is why this
 	 * returns a scratch array (the pattern the rest of the Preparator uses).
+	 *
+	 * @param messageStart	the start of messages, e.g. "Channel 3, time step 2"
 	 */
-	public static Result detect(ImagePlus channelImp, RidgeSettings rs,  ProgressReporter progress) throws IllegalStateException {
+	public static Result detect(ImagePlus channelImp, RidgeSettings rs,  ProgressReporter progress, String messageStart)
+			throws IllegalStateException, ciliaQ_Prep_jnh.SettingsRejectedException {
 		/*
 		 * The detector works on a copy in which NaN and infinite voxels are 0 (see withoutNonFinite). Since every step
 		 * below reads channelImp, including the z methods and the clean-up rules, they all see the same values. An image
@@ -170,13 +173,25 @@ public class RidgeSegmenter {
 		channelImp = withoutNonFinite(channelImp);
 		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
 
+		/*
+		 * The line detector needs an image larger than its widest mask, ceil(3.83 sigma) px (LineDetector.check_sigma).
+		 * On a smaller image it shows an error for every plane (in a macro the first one ends the run) and then fails on
+		 * every plane. So the channel is refused once, here, for ridge detection and the ridge seeds alike.
+		 */
+		int mask = ciliaQ_Prep_jnh.ij_ridge_detector_steger.LinesUtil.MASK_SIZE(
+				ciliaQ_Prep_jnh.ij_ridge_detector_steger.LinesUtil.MAX_SIZE_MASK_2, rs.sigma);
+		if (mask >= Math.min(W, H))
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException("ridge detection: the image (" + W + " x " + H
+					+ " px) is too small for sigma " + ij.IJ.d2s(rs.sigma, 3) + ", the line detector needs more than " + mask
+					+ " px in x and y. Lower the expected filament width, or use a larger image");
+
 		// One warning per call (one timepoint) is enough; avoids spam if several planes are slow.
 		final boolean[] warned = { false };
 		// 45 s for a single plane is far beyond normal; a correctly-thresholded 2048x2048 plane is seconds.
 		final SlowWatchdog watchdog = new SlowWatchdog(45_000, () -> {
 			if(warned[0]) return;
 			warned[0] = true;
-			progress.notifyMessage("Ridge detection is taking unusually long on this image. This usually"
+			progress.notifyMessage(messageStart + ": ridge detection is taking unusually long on this image. This usually"
 					+ " means the thresholds are too permissive and the detector is tracing noise rather"
 					+ " than filaments. You can let it finish, but if it does not complete soon, cancel and"
 					+ " raise 'contrast sensitivity'. (This message appears once and does not stop"
@@ -190,13 +205,13 @@ public class RidgeSegmenter {
 		int[][] perVoxel;
 		int nLines, failedPlanes;
 		if (D > 1 && !RidgeSettings.Z_CLASSIC.equals(rs.zMethod)) {
-			RidgeZ.Output o = RidgeZ.detect(channelImp, rs, RidgeSettings.Z_3D.equals(rs.zMethod), progress, watchdog);
+			RidgeZ.Output o = RidgeZ.detect(channelImp, rs, RidgeSettings.Z_3D.equals(rs.zMethod), progress, watchdog, messageStart);
 			perVoxel = o.labels;
 			nLines = o.nLines;
 			failedPlanes = o.failedPlanes;
 		} else {
 			int[] nl = new int[2]; // [0] lines detected, [1] planes on which the detector failed
-			perVoxel = classic(channelImp, rs, progress, watchdog, nl);
+			perVoxel = classic(channelImp, rs, progress, watchdog, nl, messageStart);
 			nLines = nl[0];
 			failedPlanes = nl[1];
 		}
@@ -218,7 +233,8 @@ public class RidgeSegmenter {
 	 * @return labels per plane [z][y*W + x] numbered by object (not yet consecutive); nLinesOut[0] = lines detected,
 	 * nLinesOut[1] = planes on which the detector failed
 	 */
-	static int[][] classic(ImagePlus channelImp, RidgeSettings rs, ProgressReporter progress, SlowWatchdog watchdog, int[] nLinesOut) {
+	static int[][] classic(ImagePlus channelImp, RidgeSettings rs, ProgressReporter progress, SlowWatchdog watchdog, int[] nLinesOut,
+			String messageStart) {
 		final int W = channelImp.getWidth(), H = channelImp.getHeight(), D = channelImp.getStackSize();
 		final OverlapOption overlap = rs.resolveCrossings ? OverlapOption.SLOPE : OverlapOption.NONE;
 		final RidgeCleanup rules = rs.cleanup();
@@ -237,7 +253,7 @@ public class RidgeSegmenter {
 			List<int[]> apart = new ArrayList<int[]>();
 			try {
 				Lines lines = detectPlane(ip, rs, MIN_PIECE, overlap, watchdog);
-				checkCap(lines.size(), W, H, z);
+				checkCap(lines.size(), W, H, z, messageStart);
 				for (Line l : lines)
 					LS.add(rs.estimateWidth
 							? new float[][] { l.getXCoordinates(), l.getYCoordinates(), l.getResponse(),
@@ -267,7 +283,8 @@ public class RidgeSegmenter {
 				
 				// Any other failure on one plane must not lose the others: the plane counts as empty.
 				// An ERROR, so the image is flagged, and counted for the report (Result.failedPlanes)
-				progress.notifyMessage("Ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
+				progress.notifyMessage(messageStart + ": ridge detection failed on plane " + (z + 1) 
+						+ " (" + e + ") - the plane counts as empty.",
 						ProgressReporter.ERROR);
 				nLinesOut[1]++;
 				LS = new ArrayList<float[][]>();
@@ -440,10 +457,10 @@ public class RidgeSegmenter {
 	static final double MIN_PIECE = 2;
 
 	/** the safety cap on lines per plane (see LINE_CAP_DIVISOR) */
-	static void checkCap(int nLines, int W, int H, int z) {
+	static void checkCap(int nLines, int W, int H, int z, String messageStart) {
 		int cap = Math.max(2000, (W * H) / LINE_CAP_DIVISOR);
 		if (nLines > cap) {
-			throw new IllegalStateException("ridge detection produced " + nLines
+			throw new IllegalStateException(messageStart + ": ridge detection produced " + nLines
 					+ " lines on plane " + (z + 1) + ", above the safety cap of " + cap
 					+ ". The thresholds are too permissive for this image - raise 'contrast sensitivity'.");
 		}
@@ -648,7 +665,8 @@ public class RidgeSegmenter {
 				imp.getProcessor().setColorModel(lut);
 			}
 		} catch (Throwable e) {
-			// Never let a missing or malformed LUT stop a segmentation run
+			// Never let a missing or malformed LUT stop a segmentation run; a cancelled run still ends
+			ciliaQ_Prep_jnh.CiliaQPrepMain.rethrowIfRunEnds(e);
 		}
 	}
 

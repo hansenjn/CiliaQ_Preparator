@@ -260,7 +260,7 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 			for (int x = 0; x < members.size(); x++) for (int y = x + 1; y < members.size(); y++) {
 				final Line a = eLine.get(members.get(x)), b = eLine.get(members.get(y));
 				
-				// skip if same line, or if either line was already used in another joint
+				// skip if same line, or if either line is an overlap piece (those are joined through, below)
 				if (a == b || overlap.contains(a) || overlap.contains(b)) continue;
 				
 				final float[] pa = endPoint(a, eSide.get(members.get(x))), pb = endPoint(b, eSide.get(members.get(y)));
@@ -287,7 +287,7 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 			
 			// pair every line end in cluster c[0] with every line end in cluster c[1]
 			for (final Integer s : clusters.get(c[0])) for (final Integer t : clusters.get(c[1])) {
-				final Line a = eLine.get(s), b = eLine.get(t);									// line arriving at the c[0] side (a) and c
+				final Line a = eLine.get(s), b = eLine.get(t);									// line arriving at the c[0] side (a) and at the c[1] side (b)
 				
 				// Prohibit self-join, no overlap pieces as endpoints
 				if (a == b || overlap.contains(a) || overlap.contains(b)) continue;
@@ -734,6 +734,17 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 	private float[] findLongestPath(final Line query, int dist, final List<float[]> points) {
 		// p1 is the original point to test
 		final float[] p1 = points.get(0);
+		
+		/*	CiliaQ-MOD (modification 21): a line whose two ends lie within SIGMA of each other (in x and y) gives no
+		 *	approach direction at either end, so it takes no joint (p1 itself is returned: bendDeg of a direction without
+		 *	length is 180). Before CiliaQ-MOD, the test below took its end for its start, so such a line took no joint at
+		 *	its end but one at its start. Allowing both ends instead lets a 2-3 px fragment in a crossing take a joint at
+		 *	each end, each bent up to 60 degrees, and so bridge two filaments. */
+		final float[] qx = query.getXCoordinates(), qy = query.getYCoordinates();
+		final int qn = query.getNumber() - 1;
+		if (Math.abs(qx[0] - qx[qn]) < SIGMA && Math.abs(qy[0] - qy[qn]) < SIGMA)
+			return p1;
+		
 		// Incrementally check the next position
 		dist += SLOPE_DIST;
 

@@ -11,7 +11,7 @@ import ij.gui.GenericDialog;
  * and was adapted by 
  * @author Jan N. Hansen
  * to fit into the CiliaQ_Preparator and later revised.
- * Last modification: v0.2.1, Nov 11, 2026. 
+ * Last modification: v0.2.1, Nov 23, 2026. 
  */
 public class ProcessSettings {	
 	static String pluginName = "Canny 3D Thresholder"; 
@@ -148,6 +148,22 @@ public class ProcessSettings {
 	}
 	public void setHighThr(double thr){
 		highThr = thr;
+	}
+	
+	/**
+	 * Null when the settings can work, otherwise explains why not.
+	 * CiliaQPrepMain.validateSettings refuses the run then.
+	 * Before this addition, a value that was not a number
+	 * (e.g. "NaN" in a settings file or a macro) ran without a word.
+	 * 
+	 * New in CiliaQ Preparator V0.2.1
+	 */
+	public String rejectionReason(){
+		if(!(gaussSigma >= 0.0))	return "Canny 3D: the Gauss sigma must be 0 or above (got " + ij.IJ.d2s(gaussSigma, 2) + ")";
+		if(!(cannyAlpha > 0.0))	return "Canny 3D: alpha must be above 0 (got " + ij.IJ.d2s(cannyAlpha, 2) + ")";
+		if(customValueForLowThreshold() && Double.isNaN(lowThr))	return "Canny 3D: the low threshold value is not a number";
+		if(customValueForHighThreshold() && Double.isNaN(highThr))	return "Canny 3D: the high threshold value is not a number";
+		return null;
 	}
 	
 	public boolean customValueForLowThreshold(){

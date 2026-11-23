@@ -94,6 +94,8 @@ public final class RidgeZ {
 	final Map<Integer, Integer> longPiece = new HashMap<>(), armReach = new HashMap<>();
 	final Map<Integer, double[]> armDirOf = new HashMap<>();
 	final RidgeCleanup rules;
+	
+	String messageStart = "Ridge detection"; // the start of the messages, e.g. "Channel 3, time step 2" (RidgeSegmenter.detect)
 
 	private RidgeZ(ImagePlus imp, RidgeSettings rs, boolean threeD, ProgressReporter progress) {
 		this.imp = imp;
@@ -130,8 +132,9 @@ public final class RidgeZ {
 	 * single-timepoint stack
 	 */
 	static Output detect(ImagePlus imp, RidgeSettings rs, boolean threeD, ProgressReporter progress,
-			RidgeSegmenter.SlowWatchdog watchdog) {
+			RidgeSegmenter.SlowWatchdog watchdog, String messageStart) {
 		RidgeZ r = new RidgeZ(imp, rs, threeD, progress);
+		r.messageStart = messageStart;
 		int[][] lab = r.run(watchdog);
 		Output o = new Output(lab, r.nLinesTotal);
 		o.failedPlanes = r.failedPlanes;
@@ -164,7 +167,7 @@ public final class RidgeZ {
 				} finally {
 					watchdog.disarm();
 				}
-				RidgeSegmenter.checkCap(ls.size(), W, H, z);
+				RidgeSegmenter.checkCap(ls.size(), W, H, z, messageStart);
 			} catch (IllegalStateException overCap) {
 				// the safety cap is fatal for the whole channel
 				throw overCap;
@@ -178,7 +181,7 @@ public final class RidgeZ {
 					throw (OutOfMemoryError) e;
 				}
 					
-				progress.notifyMessage("Ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
+				progress.notifyMessage(messageStart + ": ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
 						ProgressReporter.ERROR);
 				failedPlanes++;
 
@@ -609,8 +612,8 @@ public final class RidgeZ {
 	 * Copy rule (class doc step 3): drop out-of-focus copies. A kept point is dropped when a kept point at least
 	 * copyRatio x brighter lies in another plane (up to COPY_PLANES away), within COPY_REACH widths, aligned within
 	 * 30 deg, on a piece at least 3 widths long. The halo pass then drops a whole short piece (<= HALO_LENGTH widths)
-	 * when every one of its points has a partner as bright, within COPY_REACH, on a longer piece, in any direction.
-	 * Broad points are exempt from both passes, zone points from the first.
+	 * when every one of its points has a partner at least copyRatio x brighter, within COPY_REACH, on a longer piece,
+	 * in any direction. Broad points are exempt from both passes, zone points from the first.
 	 */
 	void copies(boolean[] kept, boolean[] broadPt, int[] zoneOf, Map<Long, List<Integer>> grid) {
 		final int N = P.size();

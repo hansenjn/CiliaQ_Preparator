@@ -1135,9 +1135,19 @@ public class Link {
 							junc = junch;
 
 						}
+						
 						/*
 						 * Add the junction point only if it is not one of the other line's endpoints.
 						 */
+						
+						/*	CiliaQ-MOD (modification 17): an extension at the start (it == -1) that runs into this same line
+						 *	(m == i). The points of the line were just moved up by num_add, but j is the index from before the
+						 *	move, so the split would cut the line num_add points too early. The junctions found before are
+						 *	shifted in the loop above ("Adapt indices"); this one is shifted here.
+						 *	Before CiliaQ-MOD: no shift. */
+						if (m == i && it == -1)
+							j += num_add;
+						
 						if (j > 0 && j < cont[m].num - 1) {
 							if (it == -1) {
 								if (tmp_cont.getContourClass() == LinesUtil.contour_class.cont_end_junc)
@@ -1331,10 +1341,20 @@ public class Link {
 			}
 		}
 
-		for (Junction jun : junc) {
-			if (jun != null && !(jun.cont1 == 0 && jun.cont2 == 0)) {
-				junctions.add(jun);
-			}
+		/*	CiliaQ-MOD (modification 16): only the junctions found, junc[0, num_junc), as Steger's C code returns them and as
+		 *	modification 14 does for the lines. Before this change, the loop read the whole array and skipped its empty padding
+		 *	by cont1 == 0 && cont2 == 0. A line that runs into itself gets a junction with both set to its own index, so that
+		 *	test also dropped every such junction of line 0, the line traced first (from the strongest point).
+		 *
+		 *	Loop before CiliaQ-MOD:
+		 *	for (Junction jun : junc){
+		 *		if (jun != null && !(jun.cont1 == 0 && jun.cont2 == 0)){
+		 *			junctions.add(jun);
+		 *		}
+		 *	}
+		 * */
+		for (int ji = 0; ji < num_junc; ji++) {
+			junctions.add(junc[ji]);
 		}
 		num_result.setValue(num_cont);
 	}
