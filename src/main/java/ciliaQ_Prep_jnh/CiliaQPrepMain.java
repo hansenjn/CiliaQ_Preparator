@@ -2331,6 +2331,8 @@ private boolean importSettings() {
 			return false;
 		}
 	}catch (Exception e) {
+		// In a macro, importProblem ends the macro (IJ.error throws "Macro canceled"): pass it on, not a second message
+		rethrowIfRunEnds(e);
 		importProblem(settingsFile, "Problem with loading preferences (possibly a malformed or truncated settings file).");
 		e.printStackTrace();
 		return false;
