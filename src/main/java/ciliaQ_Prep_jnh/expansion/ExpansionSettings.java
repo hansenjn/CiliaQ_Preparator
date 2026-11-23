@@ -160,8 +160,17 @@ public class ExpansionSettings {
 		inst.customSeedThr = gd.getNextNumber();
 		inst.spotDiameter = gd.getNextNumber();
 		inst.spotSensitivity = gd.getNextNumber();
-		if (inst.seedSource.equals(SEED_RIDGE))		// Call the same dialog as RIDGE DETECTION
+		
+		// Check, e.g., for a number field with no number, e.g. "5,5"
+		String invalid = ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd);
+		if (invalid != null) {
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(invalid);
+		}
+		
+		if (inst.seedSource.equals(SEED_RIDGE)) {
+			// Call the same dialog as RIDGE DETECTION
 			inst.ridge = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initByGD(task + ", ridge seeds");
+		}			
 		return inst;
 	}
 

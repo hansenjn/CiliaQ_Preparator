@@ -3,7 +3,6 @@ package ciliaQ_Prep_jnh.expansion;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-import ij.IJ;
 import ij.ImagePlus;
 import ij.process.ImageProcessor;
 

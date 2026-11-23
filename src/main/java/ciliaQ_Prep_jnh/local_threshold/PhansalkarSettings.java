@@ -98,6 +98,13 @@ public class PhansalkarSettings {
 		settingsInstance.r = gd.getNextNumber();
 		settingsInstance.p = gd.getNextNumber();
 		settingsInstance.q = gd.getNextNumber();
+		
+		// Check if number valid - abort if number field with no number, e.g. "5,5"		
+		String invalid = ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd);
+		if (invalid != null) {
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(invalid);
+		}
+		
 		return settingsInstance;
 	}
 

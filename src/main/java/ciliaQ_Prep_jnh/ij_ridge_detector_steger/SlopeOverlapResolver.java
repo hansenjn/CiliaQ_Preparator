@@ -515,18 +515,24 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 		final Set<Junction> updated = new java.util.LinkedHashSet<Junction>();	//CILIAQ-MOD for determinability
 
 		for (final Junction junction : junctions) {
+			/*	CiliaQ-MOD (modification 15): both lines first, then the junction is added once. Added after the first update
+			 *	and again after the second, it was changed while in the set: Junction is Comparable (cont1, pos, cont2, ...),
+			 *	so in a hash bin of equal identity hashes the second add or a later removal could miss it. */
+			boolean changed = false;
 			Line mergedLine = null;
 			if ((mergedLine = lineMap.get(junction.lineCont1)) != null) {
 				junction.lineCont1 = mergedLine;
 				junction.cont1 = mergedLine.getID();
-				updated.add(junction);
+				changed = true;
 			}
 			mergedLine = null;
 			if ((mergedLine = lineMap.get(junction.lineCont2)) != null) {
 				junction.lineCont2 = mergedLine;
 				junction.cont2 = mergedLine.getID();
-				updated.add(junction);
+				changed = true;
 			}
+			if (changed)
+				updated.add(junction);
 		}
 
 		return updated;
@@ -795,11 +801,12 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 	private String getKey(final Junction junction) {
 		final StringBuilder sb = new StringBuilder();
 
-		sb.append(Math.min(junction.cont1, junction.cont2));
-		sb.append(Math.max(junction.cont1, junction.cont2));
-		sb.append(junction.x);
+		// CiliaQ-MOD (modification 15): separators, so that lines 1 and 234 at a point do not give the key of lines 12 and 34 there
+		sb.append(Math.min(junction.cont1, junction.cont2)).append('_');
+		sb.append(Math.max(junction.cont1, junction.cont2)).append('_');
+		sb.append(junction.x).append('_');
 		sb.append(junction.y);
-
+		
 		return sb.toString();
 	}
 

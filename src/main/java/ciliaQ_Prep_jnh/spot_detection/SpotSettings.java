@@ -17,7 +17,8 @@ import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
  * DESIGN DECISIONS:
  *
  *  - PARAMETERISE BY DIAMETER, NOT SIGMA. Users know object size, not Gaussian sigma.
- *    sigma = diameter / (2 * 2.35) is the FWHM relation.
+ *    sigma = diameter / (2 * 2.35): the diameter counts as twice the FWHM (2.35 sigma), about the visible extent of
+ *    a blurred spot.
  *  - MULTI-SCALE, not single scale. Searching a small range of scales detects more true spots at the
  *    same sensitivity than a single large sigma.
  *  - THE SENSITIVITY IS A MINIMUM SPOT CONTRAST IN PIXEL INTENSITY ("GREY LEVEL"): how far a spot must stand above its immediate
@@ -142,7 +143,7 @@ public class SpotSettings {
 	 */
 	public static String contrastNote(double contrast, int bitDepth, double min, double max, boolean float32) {
 		if (!(max > min) || contrast >= max - min)
-			return "the minimum spot contrast (" + IJ.d2s(contrast, 1) + ") is not below the channel's range"
+			return "the minimum spot contrast (" + IJ.d2s(contrast, contrast < 1 ? 4 : 1) + ") is not below the channel's range"
 					+ " after preprocessing (maximum - minimum = " + IJ.d2s(max - min, 3) + "), so no spot can stand out"
 					+ " that much. "
 					+ (float32 ? "The channel is 32-bit after preprocessing, so the contrast is in its units"
@@ -219,18 +220,25 @@ public class SpotSettings {
 		inst.autoMinIntensity = gd.getNextBoolean();
 		inst.minIntensity = gd.getNextNumber();
 		inst.scaleRatio = gd.getNextNumber();
+		
+		// Check for a number field with no number, e.g. "5,5"
+		String invalid = ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd);
+		if (invalid != null) {
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(invalid);
+		}
+		
 		return inst;
 	}
 
 	/** @return null when the settings can work, otherwise why not (without this the result is just empty or noise). */
 	public String rejectionReason() {
-		if (diameter <= 0.0)
+		if (!(diameter > 0.0))	// !(x > 0) and the like, so that NaN (no number) is refused too
 			return "spot detection: the expected diameter must be above 0 px (got " + IJ.d2s(diameter, 2) + ")";
-		if (variation < 0.0)
+		if (!(variation >= 0.0))
 			return "spot detection: the diameter variation must be 0 or above (got " + IJ.d2s(variation, 2) + ")";
-		if (sensitivity < 0.0)
+		if (!(sensitivity >= 0.0))
 			return "spot detection: the minimum spot contrast must be 0 or above (got " + IJ.d2s(sensitivity, 2) + ")";
-		if (scaleRatio <= 1.0)
+		if (!(scaleRatio > 1.0))
 			return "spot detection: the scale ratio must be above 1 (got " + IJ.d2s(scaleRatio, 2)
 					+ ") - at 1 the two Gaussians cancel and nothing is found";
 		return null;

@@ -27,6 +27,9 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.Set;
 
+//CiliaQ note: getValue() of MutableInt and MutableDouble is deprecated from commons-lang3 3.18.0 on (the version
+//pom-scijava 43 uses). Kept on purpose: its replacement get() exists only from 3.18.0, and Fiji installations may ship
+//an older commons-lang3 (e.g. 3.17.0), where get() would fail at run time.
 import org.apache.commons.lang3.mutable.MutableInt;
 
 import ij.IJ;

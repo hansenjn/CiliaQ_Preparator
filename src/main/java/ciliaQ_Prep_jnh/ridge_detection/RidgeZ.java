@@ -42,11 +42,12 @@ import ij.process.ImageProcessor;
  *     lies in a plane closer to it.
  *  3. COPY RULE (optional, with its halo rule). A kept point is an out-of-focus copy when a kept point at least
  *     copyRatio x brighter lies in another plane (up to 4 away), within 1.5 line widths and aligned within 30 deg, on a
- *     piece at least 3 widths long. A short piece (at most 4 widths) is dropped whole when every point of it has such a
- *     brighter partner on a longer piece (the out-of-focus halo of a short bright filament).
+ *     piece at least 3 widths long. A short piece (at most 4 widths) is dropped whole when every point of it has a
+ *     brighter partner on a longer piece, in any direction (the out-of-focus halo of a short bright filament).
  *  4. CLEAN-UP RULES (RidgeCleanup) on the kept stretches of each plane: pairs of lines that may never be joined.
- *  5. JOINING. Consecutive kept points of a line, and points in neighbouring planes that are aligned and lie within a
+ *  5. JOINING. Consecutive points of a line, and points in neighbouring planes that are aligned and lie within a
  *     line width (plus one plane step) of each other at their fitted depths - best first (closest, best aligned).
+ *     All detections are joined, kept or not; only the kept points are painted and measured.
  *  6. 3D only: Steger runs without overlap resolution here, so lines are cut at junctions. Where a filament crosses
  *     another at a different depth, the 2D resolution of one plane may pair the branches differently from the next.
  *     Instead, junctions of all planes that lie together form a crossing site; links through z are not trusted in its
@@ -147,28 +148,43 @@ public final class RidgeZ {
 			final int pz0 = P.size();
 			ImageProcessor ip = imp.getStack().getProcessor(z + 1);
 			LineDetector det = new LineDetector().setLineWidth(w);
-			Lines ls; // the overlap resolution gets the user's width
+			Lines ls, lsS = null; // the overlap resolution gets the user's width; lsS: 3D, the plane as 2D sees it (lines2D)
 			try {
 				watchdog.arm();
 				try {
 					ls = det.detectLines(ip, rs.sigma, rs.upperThreshold, rs.lowerThreshold, MIN_PIECE, rs.maxLength,
 							rs.darkLine, rs.correctPosition, rs.estimateWidth, rs.extendLine,
-							threeD ? OverlapOption.NONE : OverlapOption.SLOPE);
+							threeD ? OverlapOption.NONE : OverlapOption.SLOPE);	// not rs.resolveCrossings: in-focus always resolves, 3D pairs crossings itself
+					if (twoDLines) {
+						// here, inside the guard and the watchdog: a failure leaves this plane empty, not the image
+						lsS = new LineDetector().setLineWidth(w).detectLines(ip, rs.sigma, rs.upperThreshold, rs.lowerThreshold,
+								MIN_PIECE, rs.maxLength, rs.darkLine, rs.correctPosition, rs.estimateWidth, rs.extendLine,
+								OverlapOption.SLOPE);
+					}						
 				} finally {
 					watchdog.disarm();
 				}
 				RidgeSegmenter.checkCap(ls.size(), W, H, z);
 			} catch (IllegalStateException overCap) {
-				throw overCap; // the safety cap is fatal for the whole channel
-			} catch (Throwable e) { // any other failure on one plane must not lose the others: the plane counts as empty
-				if (e instanceof ThreadDeath) // A stopped thread (Abort Macro, the Script Editor's Kill) ends the run
-					throw (ThreadDeath) e;
+				// the safety cap is fatal for the whole channel
+				throw overCap;
+			} catch (Throwable e) {
+				// any other failure on one plane must not lose the others: the plane counts as empty
+				// A cancelled macro or a stopped thread (Abort Macro, the Script Editor's Kill) ends the run
+				ciliaQ_Prep_jnh.CiliaQPrepMain.rethrowIfRunEnds(e);
+				
+				if (e instanceof OutOfMemoryError){
+					// the next plane would run out of memory too: the image ends, its memory is freed
+					throw (OutOfMemoryError) e;
+				}
+					
 				progress.notifyMessage("Ridge detection failed on plane " + (z + 1) + " (" + e + ") - the plane counts as empty.",
 						ProgressReporter.ERROR);
 				failedPlanes++;
 
-				if (twoDLines)
+				if (twoDLines){
 					slopeSeq.add(new ArrayList<int[]>());
+				}
 				continue;
 			}
 			nLinesTotal += ls.size();
@@ -237,7 +253,7 @@ public final class RidgeZ {
 				lineId++;
 			}
 			if (twoDLines)
-				slopeSeq.add(lines2D(ip, pz0));
+				slopeSeq.add(lines2D(lsS, pz0));
 			for (int[] tp : tracedLS) {
 				int[] sa = span.get(lineBase + tp[0]), sc = span.get(lineBase + tp[1]);
 				if (sa[1] > 0 && sc[1] > 0)
@@ -251,12 +267,6 @@ public final class RidgeZ {
 		for (int i = 0; i < N; i++) {
 			float[] p = P.get(i);
 			grid.computeIfAbsent(key((int) p[2], (int) (p[0] / 4), (int) (p[1] / 4)), k -> new ArrayList<>()).add(i);
-		}
-		int[] bestUp = new int[N], bestDown = new int[N];
-		for (int i = 0; i < N; i++) {
-			float[] p = P.get(i);
-			bestUp[i] = nearest(grid, p, (int) p[2] + 1);
-			bestDown[i] = nearest(grid, p, (int) p[2] - 1);
 		}
 
 		// in-focus plane per point
@@ -322,12 +332,12 @@ public final class RidgeZ {
 			}
 		}
 		List<int[]> perm = new ArrayList<>(zonePerm), rejL = new ArrayList<>();
-		zLinks(kept, noZ, bestUp, bestDown, zPk, grid, linkD, perm, rejL);
+		zLinks(noZ, zPk, grid, linkD, perm, rejL);
 		if (threeD) {
 			Map<Integer, List<Integer>> siteArms = pairZones(isOv, siteOf, zoneOf, zPk);
-			seedMerge(grid, perm, rejL, siteArms, zPk);
+			seedMerge(perm, rejL, siteArms, zPk);
 		}
-		shortPieces(kept, zPk); // step 6, last
+		shortPieces(kept, zPk); // the short-piece rule, last
 
 		// objects: minimum length on the 3D object, physical painting, pieces joined
 		Map<Integer, double[]> obj = new HashMap<>();
@@ -360,10 +370,11 @@ public final class RidgeZ {
 	}
 
 	/**
-	 * Step 6 on the finished objects (RidgeShortPieces): each kept point at its
-	 * in-focus z, scaled by the voxel size, with one plane (Z_DISC) of tolerance,
-	 * so a standing cilium reaches far in z and is never a short piece. Joins
-	 * override the pairs kept apart; dropped pieces lose their points.
+	 * The short-piece rule (6 in the dialog) on the finished objects
+	 * (RidgeShortPieces): each kept point at its in-focus z, scaled by the voxel
+	 * size, with one plane (Z_DISC) of tolerance, so a standing cilium reaches far
+	 * in z and is never a short piece. Joins override the pairs kept apart; dropped
+	 * pieces lose their points.
 	 */
 	void shortPieces(boolean[] kept, double[] zPk) {
 		final int mode = rs.shortPiecesMode();
@@ -598,8 +609,8 @@ public final class RidgeZ {
 	 * Copy rule (class doc step 3): drop out-of-focus copies. A kept point is dropped when a kept point at least
 	 * copyRatio x brighter lies in another plane (up to COPY_PLANES away), within COPY_REACH widths, aligned within
 	 * 30 deg, on a piece at least 3 widths long. The halo pass then drops a whole short piece (<= HALO_LENGTH widths)
-	 * when every one of its points has such a brighter partner on a longer piece. Broad points and zone points are
-	 * exempt.
+	 * when every one of its points has a partner as bright, within COPY_REACH, on a longer piece, in any direction.
+	 * Broad points are exempt from both passes, zone points from the first.
 	 */
 	void copies(boolean[] kept, boolean[] broadPt, int[] zoneOf, Map<Long, List<Integer>> grid) {
 		final int N = P.size();
@@ -810,13 +821,10 @@ public final class RidgeZ {
 	}
 
 	/**
-	 * 3D: the plane detected as 2D does (with overlap resolution), each line mapped
+	 * 3D: the plane detected as 2D does (with overlap resolution; detected in run), each line mapped
 	 * onto this plane's points (nearest within 1 px)
 	 */
-	List<int[]> lines2D(ImageProcessor ip, int pz0) {
-		Lines lsS = new LineDetector().setLineWidth(w).detectLines(ip, rs.sigma, rs.upperThreshold, rs.lowerThreshold,
-				MIN_PIECE, rs.maxLength, rs.darkLine, rs.correctPosition, rs.estimateWidth, rs.extendLine,
-				OverlapOption.SLOPE);
+	List<int[]> lines2D(Lines lsS, int pz0) {
 		Map<Long, List<Integer>> g = new HashMap<>();
 		for (int i = pz0; i < P.size(); i++) {
 			float[] p = P.get(i);
@@ -859,11 +867,11 @@ public final class RidgeZ {
 	 * fails this is deferred to perm (permissive) and recorded in rejL (so seedMerge can keep two long tracks apart).
 	 * Points in a crossing zone (noZ) only ever get permissive links.
 	 */
-	void zLinks(boolean[] kept, boolean[] noZ, int[] bestUp, int[] bestDown, double[] zPk,
-			Map<Long, List<Integer>> grid, double linkD, List<int[]> perm, List<int[]> rejL) {
+	void zLinks(boolean[] noZ, double[] zPk, Map<Long, List<Integer>> grid, double linkD, List<int[]> perm, List<int[]> rejL) {
 		final int N = P.size();
 		final double coh = threeD ? COHERENCE : 0;
 		final int minSt = (int) Math.ceil(w);
+		final int gz = Math.max(2, (int) Math.ceil(w / 4)); // cells of 4 px: +-gz cells reach every partner up to w away (at least the old +-2)
 		List<int[]> links = new ArrayList<>();
 		Map<Long, int[]> rng = new HashMap<>();
 		for (int i = 0; i < N; i++) {
@@ -872,8 +880,8 @@ public final class RidgeZ {
 				int z2 = (int) p[2] + dz;
 				if (z2 < 0 || z2 >= D)
 					continue;
-				for (int gx = -2; gx <= 2; gx++)
-					for (int gy = -2; gy <= 2; gy++)
+				for (int gx = -gz; gx <= gz; gx++)
+					for (int gy = -gz; gy <= gz; gy++)
 						for (int j : grid.getOrDefault(key(z2, (int) (p[0] / 4) + gx, (int) (p[1] / 4) + gy),
 								Collections.<Integer>emptyList())) {
 							float[] q = P.get(j);
@@ -1336,8 +1344,7 @@ public final class RidgeZ {
 	 * between them, or one passes through a site where other long ones arrive);
 	 * then the permissive links merge everything else
 	 */
-	void seedMerge(Map<Long, List<Integer>> grid, List<int[]> perm, List<int[]> rejL,
-			Map<Integer, List<Integer>> siteArms, double[] zPk) {
+	void seedMerge(List<int[]> perm, List<int[]> rejL, Map<Integer, List<Integer>> siteArms, double[] zPk) {
 		final double longL = Math.max(rs.minLength, LONG * w);
 		Map<Integer, Double> len = extent();
 		standing(zPk, len);
@@ -1951,8 +1958,9 @@ public final class RidgeZ {
 			return -1;
 		int best = -1;
 		double bd = tol;
-		for (int gx = -1; gx <= 1; gx++)
-			for (int gy = -1; gy <= 1; gy++)
+		final int g = Math.max(1, (int) Math.ceil(tol / 4)); // cells of 4 px: +-g reach tol
+		for (int gx = -g; gx <= g; gx++)
+			for (int gy = -g; gy <= g; gy++)
 				for (int j : grid.getOrDefault(key(z2, (int) (p[0] / 4) + gx, (int) (p[1] / 4) + gy),
 						Collections.<Integer>emptyList())) {
 					float[] q = P.get(j);

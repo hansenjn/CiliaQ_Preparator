@@ -123,7 +123,7 @@ public class RidgeSegmenter {
 	 * 16-bit image, is returned as it is, so its results stay the same.
 	 */
 	static ImagePlus withoutNonFinite(ImagePlus imp) {
-		if (!hasNonFinite(imp))
+		if (ciliaQ_Prep_jnh.CiliaQPrepStatistics.countNonFinite(imp) == 0)
 			return imp; // 8- and 16-bit images never hold such values
 		ImageStack st = imp.getStack(), copy = new ImageStack(st.getWidth(), st.getHeight());
 		for (int s = 1; s <= st.getSize(); s++) {
@@ -139,21 +139,6 @@ public class RidgeSegmenter {
 		out.setCalibration(imp.getCalibration().copy());
 		return out;
 	}
-
-	/** True if a voxel is NaN, +Infinity or -Infinity. Only 32-bit images can hold such values, so other
-	 *  images return false without reading their voxels; a 32-bit image is read only up to the first such voxel. */
-	static boolean hasNonFinite(ImagePlus imp) {
-		if (imp.getBitDepth() != 32) return false;
-		ImageStack st = imp.getStack();
-		for (int s = 1; s <= st.getSize(); s++) {
-			float[] p = (float[]) st.getPixels(s);
-			for (int i = 0; i < p.length; i++) {
-				if (!Float.isFinite(p[i])) return true;
-			}
-		}
-		return false;
-	}
-
 
 	/** @return The number of NaN voxels of an image (0 unless it is 32-bit);
 	 *	for the report's NaN note (CiliaQPrepMain.noteNaN)
@@ -271,8 +256,14 @@ public class RidgeSegmenter {
 				 */
 				throw overCap;
 			} catch (Throwable e) {
-				if (e instanceof ThreadDeath) // A stopped thread (Abort Macro, the Script Editor's Kill) ends the run
-					throw (ThreadDeath) e;
+				// A cancelled macro or a stopped thread (Abort Macro, the Script Editor's Kill) ends the run
+				ciliaQ_Prep_jnh.CiliaQPrepMain.rethrowIfRunEnds(e);					
+
+				if (e instanceof OutOfMemoryError){
+					// the next plane would run out of memory too: the image ends, its memory is freed
+					throw (OutOfMemoryError) e;
+				}
+					
 				
 				// Any other failure on one plane must not lose the others: the plane counts as empty.
 				// An ERROR, so the image is flagged, and counted for the report (Result.failedPlanes)
@@ -454,8 +445,7 @@ public class RidgeSegmenter {
 		if (nLines > cap) {
 			throw new IllegalStateException("ridge detection produced " + nLines
 					+ " lines on plane " + (z + 1) + ", above the safety cap of " + cap
-					+ " (one per " + LINE_CAP_DIVISOR + " pixels). The thresholds are too"
-					+ " permissive for this image - raise 'contrast sensitivity'.");
+					+ ". The thresholds are too permissive for this image - raise 'contrast sensitivity'.");
 		}
 	}
 

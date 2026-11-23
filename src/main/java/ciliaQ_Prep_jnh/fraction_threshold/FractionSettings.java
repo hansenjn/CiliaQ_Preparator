@@ -125,6 +125,12 @@ public class FractionSettings {
 			inst.bgPercentile = gd.getNextNumber();
 			inst.signalPercentileGlobal = gd.getNextNumber();
 		}
+		
+		// Check for valid numbers, e.g., number field with no number, e.g. "5,5" needs cancellation
+		String invalid = ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd);
+		if (invalid != null) {
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(invalid);
+		}
 		return inst;
 	}
 
@@ -140,7 +146,7 @@ public class FractionSettings {
 					+ " (measured 123 objects -> 1 at f = 0.15)";
 		if (tileSize < 8)
 			return "fraction threshold: a tile of " + tileSize + " px holds too few pixels for a"
-					+ " percentile to mean anything";
+					+ " percentile to mean anything, so 8 px are used";
 		return null;
 	}
 

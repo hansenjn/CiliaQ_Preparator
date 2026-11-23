@@ -26,7 +26,10 @@ import ij.process.ImageProcessor;
  * 	- medianPercentilesMad: median, p99.9, MAD and p0.1 of a channel, for the ridge report and its noise check;
  * 	- positiveQuantile: a percentile of the values above 0, for the spot detector's automatic minimum intensity;
  * 	- ExactRanks: exact percentiles of 32-bit values without storing them (used by all of the above);
- * 	- rank: the value at a rank of a histogram of integer values.
+ * 	- rawSignalToNoise: the raw signal range over the noise, for the warning before ridge detection;
+ * 	- countNonFinite: the voxels that are not a number or infinite, for the methods that cannot work with them;
+ * 	- rank: the value at a rank of a histogram of integer values;
+ * 	- Numbers: numbers for settings files and recorded macros, written so that reading them back gives the same value.
  */
 public class CiliaQPrepStatistics {
 
@@ -45,7 +48,7 @@ public class CiliaQPrepStatistics {
 	 * Tiles without a single positive voxel in the RAW channel (padding, Clear Outside, zero backgrounds) are left out:
 	 * their range of 0 would pull the median to 0. This makes the range more robust across images with black areas from
 	 * stitching non-rectangular regions or with large regions of 0 background. If the raw channel has no positive voxel
-	 * at all, the whole stack alone gives the range (0).
+	 * at all, the whole stack alone gives the range (0, or NaN if no voxel is a number).
 	 *
 	 * Memory and size: 8- and 16-bit channels are counted in one histogram per tile, with long bins, so even a zero
 	 * background of more than 2^31 voxels cannot overflow a bin. 32-bit channels (e.g. after Divide by Background) go
@@ -58,7 +61,7 @@ public class CiliaQPrepStatistics {
 		
 		/** The legend of tileList, for the reports of ridge detection and the ridge seeds (once per channel). */
 		public static final String TILE_LEGEND = "whole = whole stack; g1-g9 = 3x3 grid, row by row; s1-s9 = the same grid"
-				+ " shifted by half a tile; (...) = left out (no positive voxel in the raw channel)";
+				+ " shifted by half a tile; (...) = left out (no positive voxel in the raw channel, or a range that is no number)";
 	
 		/** The median of the kept tile ranges: the value the thresholds are derived from. */
 		public final double range;
@@ -457,6 +460,22 @@ public class CiliaQPrepStatistics {
 		return new double[] { noise > 0.0 ? range / noise : Double.NaN, range, noise };
 	}
 
+	/**
+	 * The voxels of a channel that are not a number or infinite. Only 32-bit channels can hold them, e.g. 0/0 or x/0
+	 * after Divide by Background where the blurred background is 0 (an 8- or 16-bit channel is blurred in its own type,
+	 * so the background of a dim voxel can round to 0). Used before FRACTION, PHANSALKAR and dark lines, which refuse
+	 * such a channel, and by ridge detection, which sets the voxels to 0 (RidgeSegmenter.withoutNonFinite).
+	 */
+	public static long countNonFinite(ImagePlus imp){
+		if(imp.getBitDepth() != 32)	return 0;
+		long n = 0;
+		for(int s = 1; s <= imp.getStackSize(); s++){
+			float [] p = (float []) imp.getStack().getPixels(s);
+			for(int i = 0; i < p.length; i++)	if(!Float.isFinite(p [i]))	n++;
+		}
+		return n;
+	}
+
 	/** The value at 0-based rank k of a histogram of integer values. */
 	static double rank(long [] hist, long k){
 		long acc = 0;
@@ -477,9 +496,9 @@ public class CiliaQPrepStatistics {
 	 *
 	 * How: every float becomes an int "sort key" whose order is exactly the order of java.util.Arrays.sort (-0 before
 	 * +0, every NaN after +Infinity). Two passes over the values then give the value at any rank exactly:
-	 * 	- pass 1 counts the keys by their upper 16 bits (count);
+	 * 	- the first pass counts the keys by their upper 16 bits (count);
 	 * 	- locate finds, for each wanted rank, the bucket it falls in and its rank inside that bucket;
-	 * 	- pass 2 counts the lower 16 bits, only for values in those buckets (refine);
+	 * 	- the second pass counts the lower 16 bits, only for values in those buckets (refine);
 	 * 	- value reads the exact value. It is the value Arrays.sort would put at that rank, not an approximation.
 	 * Memory: (groups + groups x ranks) x 65536 longs, whatever the number of values (19 tiles x 2 ranks: 30 MB).
 	 *

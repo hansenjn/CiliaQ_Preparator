@@ -56,14 +56,14 @@ public class RidgeCleanup {
 	/** Which rules this call runs: 3D reads branch and crossing off the lines as 2D sees them, the rest off its own. */
 	public boolean runLineRules = true, runOtherRules = true;
 
-	/** Fixed constants of the rules, in line widths; SHARE and BRANCH_TOUCH_PX are in px. */
+	/** Fixed constants of the rules, in line widths; SHARE, CONTINUITY_BLUR and BRANCH_TOUCH_PX (below) are in px. */
 	static final double KINK_ARM = 2, PAR_MIN = 0.5, PAR_MAX = 1.2, PAR_LEN = 2, SHARE = 0.5, CONTINUITY_BLUR = 1;
 	
 	/** How near counts as touching: a line end at another line's side (branch rule, in px), and a runner's end at the
 	 *  other runner (turn release, in line widths). */
 	static final double BRANCH_TOUCH_PX = 1.5, TURN_TOUCH_W = 1.5;
 
-	/** Counters for the log. */
+	/** Counters of what the rules did (not reported at present). */
 	public int nKink, nBranch, nCross, nPar, nHairpin;
 
 	private float[] img;	// the plane, smoothed by CONTINUITY_BLUR, for the turn release's continuity test
@@ -434,9 +434,9 @@ public class RidgeCleanup {
 	 * popped, its value is optimal and is returned immediately. The search is confined to the bounding box of the
 	 * two endpoints grown by margin m, so it is local and cheap.
 	 *
-	 * <p>Start and goal are each snapped to the brightest pixel within 1 px of the respective endpoint (endpoints
-	 * are sub-pixel). If the box is empty (both endpoints outside the image) or lo <= 0, there is no meaningful path
-	 * and 0 is returned.
+	 * <p>The start is snapped to the brightest pixel within 1 px of A's end, and every pixel within 1 px of B's end
+	 * is a goal (endpoints are sub-pixel). If the box is empty (both endpoints outside the image) or lo <= 0, there
+	 * is no meaningful path and 0 is returned.
 	 *
 	 * @param ax, ay the start point (sub-pixel)
 	 * @param bx, by the goal point (sub-pixel)

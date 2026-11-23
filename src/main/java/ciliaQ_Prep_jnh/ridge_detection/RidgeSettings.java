@@ -63,7 +63,7 @@ public class RidgeSettings implements Cloneable {
 	public double lineWidth = 2.0;			// pixels, IN THE PREPROCESSED IMAGE
 	public double sensitivity = 8.0;		// line contrast = sensitivity x signal range; 8 suits sparse cilia in noisy ICC IF images (judged by eye on 29 stacks)
 	public double minLength = 10.0;			// pixels
-	public boolean resolveCrossings = true;	// OverlapOption.SLOPE when true
+	public boolean resolveCrossings = true;	// OverlapOption.SLOPE when true; classic only: in-focus always resolves, 3D pairs crossings itself
 
 	/** z-stacks: how the lines of the planes become objects. Same result on a single plane. */
 	public static final String Z_CLASSIC = "Classic 2D (all planes)", Z_INFOCUS = "2D in-focus plane",
@@ -246,28 +246,31 @@ public class RidgeSettings implements Cloneable {
 	 * @return null when acceptable, otherwise the reason to report and abort with.
 	 */
 	public String settingsRejectionReason() {
-		if (lineWidth <= 0.0)
+		if (!(lineWidth > 0.0))	// !(x > 0) and the like, so that NaN (no number) is refused too
 			return "ridge detection: the expected filament width must be above 0 px (got " + IJ.d2s(lineWidth, 2) + ")";
-		if (!advancedOverride && sensitivity <= 0.0)
+		if (!advancedOverride && !(sensitivity > 0.0))
 			return "ridge detection: the contrast sensitivity must be above 0 (got " + IJ.d2s(sensitivity, 2)
 					+ ") - at 0 the derived threshold is 0 and the detector traces noise";
-		if (minLength < 0.0)
+		if (!(minLength >= 0.0))
 			return "ridge detection: the minimum filament length must be 0 or above (got " + IJ.d2s(minLength, 1) + ")";
-		if (copyRule && copyRatio <= 1.0)
+		if (copyRule && !(copyRatio > 1.0))
 			return "ridge detection: the copy brightness ratio must be above 1 (got " + IJ.d2s(copyRatio, 2) + ")";
-		if (kinkRule && (kinkAngle <= 0.0 || kinkAngle >= 180.0))
+		if (kinkRule && !(kinkAngle > 0.0 && kinkAngle < 180.0))
 			return "ridge detection: the kink angle must lie between 0 and 180 degrees (got " + IJ.d2s(kinkAngle, 1) + ")";
-		if (parallelRule && turnRelease && (turnAngle <= 0.0 || turnAngle >= 90.0 || turnTangent <= 0.0 || turnContinuity < 0.0 || turnContinuity > 1.0))
+		if (parallelRule && turnRelease && !(turnAngle > 0.0 && turnAngle < 90.0 && turnTangent > 0.0 && turnContinuity >= 0.0 && turnContinuity <= 1.0))
 			return "ridge detection: turn release needs an angle between 0 and 90 degrees, a tangent above 0 line widths"
 					+ " and a continuity between 0 and 1 (got " + IJ.d2s(turnAngle, 1) + ", " + IJ.d2s(turnTangent, 2) + ", " + IJ.d2s(turnContinuity, 2) + ")";
-		if (zProfileSmoothing < 0.0)
+		if (Double.isNaN(maxLength))
+			return "ridge detection: the maximum filament length is not a number (0 = unlimited)";
+		if (!(zProfileSmoothing >= 0.0))
 			return "ridge detection: the z-profile smoothing must be 0 (automatic) or above (got " + IJ.d2s(zProfileSmoothing, 2) + ")";
 		
 		/*	Values the user set by hand are checked here, before the run. Derived values cannot be wrong in
 		 *	these ways; set by hand, a sigma of 0 or a lower threshold above the upper ran without a word, and an upper
 		 *	threshold of about 0 was refused only during processing (and called derived). */
-		if (advancedOverride && !(sigma > 0.0))
-			return "ridge detection: the sigma you set must be above 0 (got " + IJ.d2s(sigma, 4) + ")";
+		if (advancedOverride && !(sigma >= 0.4))	// the line detector's lower limit: below it, it shows an error for every plane
+			return "ridge detection: the sigma you set must be at least 0.4, the smallest the line detector accepts (got "
+					+ IJ.d2s(sigma, 4) + ")";
 		if (advancedOverride && !(upperThreshold > 1e-6))
 			return "ridge detection: the upper threshold you set is about 0 or below (got " + IJ.d2s(upperThreshold, 6)
 					+ ") - the detector would trace noise and might not finish";
@@ -325,7 +328,8 @@ public class RidgeSettings implements Cloneable {
 	 */
 	public static RidgeSettings initByGD(String task) throws Exception {
 		final RidgeSettings inst = new RidgeSettings();
-		final java.awt.Font heading = ciliaQ_Prep_jnh.CiliaQPrepMain.HEADING_FONT, sub = ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT,
+		final java.awt.Font heading = ciliaQ_Prep_jnh.CiliaQPrepMain.HEADING_FONT,
+				sub = ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT,
 				help = ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT;
 
 		final GenericDialog gd = new GenericDialog(pluginName + ", version " + pluginVersion + " - ridge detection settings");
@@ -336,11 +340,12 @@ public class RidgeSettings implements Cloneable {
 
 		gd.setInsets(0, 5, 0); gd.addNumericField("Expected filament width in preprocessed image (px)", inst.lineWidth, 2);
 		gd.setInsets(0, 5, 0); gd.addNumericField("Contrast sensitivity (higher = stricter = fewer lines)", inst.sensitivity, 2);
-		gd.setInsets(0, 5, 0); gd.addMessage("Default 8 suits sparse cilia in noisy images. Lower it for clean, high-contrast or densely packed cilia"
+		gd.setInsets(0, 25, 0); gd.addMessage("Default 8 suits sparse cilia in noisy images. Lower it for clean, high-contrast or densely packed cilia"
 				+ "\n(in a test on different image and cilia types, good values were 0.09 to 16, by data type and resolution).", help);
-		gd.setInsets(2, 5, 0); gd.addNumericField("Min. filament length (px) - set just below shortest real filament", inst.minLength, 1);
+		gd.setInsets(0, 5, 0); gd.addNumericField("Min. filament length (px) - set just below shortest real filament", inst.minLength, 1);
 		gd.setInsets(0, 5, 0); gd.addCheckbox("Resolve crossings - trace filaments through crossings instead of ending there", inst.resolveCrossings);
-				
+		gd.setInsets(0, 5, 0); gd.addMessage("(Resolve crossings applies to classic z method only; in-focus always resolves them; 3D pairs crossings across planes itself)", help);		
+		
 		gd.setInsets(0, 0, 0); gd.addMessage("----- Z-stacks -----", sub);
 		
 		gd.setInsets(0, 0, 0); gd.addChoice("Z method", Z_METHODS, inst.zMethod);
@@ -360,14 +365,17 @@ public class RidgeSettings implements Cloneable {
 		gd.setInsets(0,5,0); gd.addCheckbox("5 Parallel rule - split filaments running closely side by side", inst.parallelRule);
 		gd.setInsets(0,25,0); gd.addCheckbox("--> Turn release - keep a folded filament as one (in parallel rule)", inst.turnRelease);
 		
-		gd.setInsets(0,5,0); gd.addChoice("6 Short pieces (< 2 * fil. width & adjacent; e.g., forks at cilium tip)", SHORT_CHOICES, inst.shortPieces);
+		gd.setInsets(0,20,0); gd.addChoice("6 Short pieces (< 2 * fil. width & adjacent; e.g., forks at cilium tip)", SHORT_CHOICES, inst.shortPieces);
 		
 		gd.setInsets(0, 0, 0); gd.addMessage("----- Advanced -----", sub);
 		gd.setInsets(0, 0, 0);
 		gd.addCheckbox("Show advanced settings (sigma, thresholds, detector switches, z profile, turn release)", false);
 		gd.addHelp(HELP_URL);
 		gd.showDialog();
-		if (gd.wasCanceled()) throw new Exception("Ridge detection settings dialog cancelled");
+		
+		if (gd.wasCanceled()) {
+			throw new Exception("Ridge detection settings dialog cancelled");
+		}
 
 		// read back in the order the fields were added, per kind
 		inst.lineWidth = gd.getNextNumber();
@@ -390,7 +398,13 @@ public class RidgeSettings implements Cloneable {
 		
 		inst.shortPieces = gd.getNextChoice();
 
-		boolean showAdvanced = gd.getNextBoolean();		
+		boolean showAdvanced = gd.getNextBoolean();
+		
+		// Check for a number field with no number, e.g. "5,5"
+		String invalid = ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd);
+		if (invalid != null) {
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(invalid);		
+		}
 		
 		if (showAdvanced) advancedByGD(inst);
 		return inst;
@@ -401,7 +415,7 @@ public class RidgeSettings implements Cloneable {
 	 * derive (on a 0-255 range, as a guide, the same for bright and dark lines; processing derives them from each
 	 * channel); a value edited away from that counts as an override. Cancel keeps the defaults and goes on.
 	 */
-	static void advancedByGD(final RidgeSettings inst) {
+	static void advancedByGD(final RidgeSettings inst) throws ciliaQ_Prep_jnh.SettingsRejectedException {
 		final RidgeSettings preview = derivedPreview(inst.lineWidth, inst.sensitivity);
 		final GenericDialog gd = new GenericDialog(pluginName + " - ridge detection: advanced settings");
 		final java.awt.Font sub = ciliaQ_Prep_jnh.CiliaQPrepMain.SUB_HEADING_FONT, help = ciliaQ_Prep_jnh.CiliaQPrepMain.INSTRUCTIONS_FONT;
@@ -447,6 +461,12 @@ public class RidgeSettings implements Cloneable {
 		inst.correctPosition = gd.getNextBoolean();
 		inst.estimateWidth = gd.getNextBoolean();
 		inst.extendLine = gd.getNextBoolean();
+		
+		// Check for a number field with no number, e.g. "5,5"
+		String invalid = ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd);
+		if (invalid != null) {
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(invalid);
+		}
 
 		/* An advanced value counts as an override only if it differs from what the simple settings derive, so a field that
 		 * was only pre-filled is not mistaken for one. */

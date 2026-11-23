@@ -12,7 +12,7 @@ package ciliaQ_Prep_jnh;
 * GNU General Public License for more details.
 * 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 20, 2026)
+* Date: September 29, 2019 (This Version: November 22, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -191,7 +191,7 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 	static final String[] intensityVariant = {"Keep intensities above threshold (creates a background-removed image)",
 			"Set intensities above thresholds to maximum possible intensity value (creates a binary image)",
 			"Set intensities above thresholds to max unless 0 after preprocessing (creates a binary image)"};	// New in V0.2.1
-	boolean keepIntensities = false;
+	boolean keepIntensities = true; // New in V0.2.1: back to true, since used to be default style before v0.2.0
 	
 	/**	New in V0.2.1: the third segmentation style: binary, and a voxel that is 0 or NaN after preprocessing stays
 	 *	background whatever the threshold (staysBackground). */
@@ -271,7 +271,7 @@ public class CiliaQPrepMain implements PlugIn, Measurements {
 			+ "New options:\n"
 			+ "  - A median filter as the first preprocessing step\n"
 			+ "  - Stack handling per slice\n"
-			+ "  - Binary output that keeps 0- or NA-intensity voxels after preprocessing out of the mask\n"
+			+ "  - Binary output that keeps 0- or NaN-intensity voxels after preprocessing out of the mask\n"
 			+ "  - Automatic thresholds from the full 16-bit histogram (advanced setting)\n"
 			+ "\n"
 			+ "Output and macros:\n"
@@ -439,7 +439,9 @@ public void run(String arg) {
 					/*	Changed V0.2.1: every settings dialog throws an exception when it is cancelled ("... cancelled", Canny
 					 *	"GD canceled by user") - that stays silent. Anything else was a real failure that ended the run
 					 *	without a word; now it is shown. */
-					if(e.getMessage() == null || !e.getMessage().toLowerCase().contains("cancel")){
+					if(e instanceof SettingsRejectedException){
+						IJ.error(PLUGIN_NAME, "The settings for " + task + " were not accepted:\n" + e.getMessage());	// New in V0.2.1, e.g. a number field with no number
+					}else if(e.getMessage() == null || !e.getMessage().toLowerCase().contains("cancel")){
 						IJ.error(PLUGIN_NAME, "The settings dialog for " + task + " failed:\n" + e);
 					}
 					if(record) Recorder.record = true;	// restore recorder before aborting
@@ -491,12 +493,6 @@ public void run(String arg) {
 			od.setLocation(0, 0);
 			od.setVisible(true);
 
-			od.addWindowListener(new java.awt.event.WindowAdapter() {
-				public void windowClosing(WindowEvent winEvt) {
-					return;
-				}
-			});
-
 			// Waiting for od to be done
 			while (od.done == false) {
 				try {
@@ -505,6 +501,11 @@ public void run(String arg) {
 				}
 			}
 
+			if(od.filesToOpen.isEmpty()){
+				// New in V0.2.1: the manager was closed, or started without a file - nothing to do
+				IJ.log(PLUGIN_NAME + ": no file selected - nothing to do.");
+				return;
+			}
 			tasks = od.filesToOpen.size();
 			name = new String[tasks];
 			dir = new String[tasks];
@@ -515,23 +516,28 @@ public void run(String arg) {
 		}else if(selectedTaskVariant.equals(taskVariant[0])){
 			try {
 				if(WindowManager.getIDList()==null){
-					new WaitForUserDialog("Plugin canceled - no image open in FIJI!").show();
+					stopMessage("Plugin canceled - no image open in FIJI!");
 					return;
 				}
 				if(WindowManager.getCurrentImage().changes) {
-					new WaitForUserDialog("Plugin canceled - the active image had unsaved changes!"
+					stopMessage("Plugin canceled - the active image had unsaved changes!"
 							+ "\nCiliaQ can only process images that are saved!"
-							+ "\nSave the image and retry running CiliaQ_Preparator...").show();
+							+ "\nSave the image and retry running CiliaQ_Preparator...");
 					return;
 				}
 				FileInfo info = WindowManager.getCurrentImage().getOriginalFileInfo();
+				if(info == null || info.directory == null || info.directory.isEmpty()){	// New in V0.2.1, e.g. created or duplicated in Fiji
+					stopMessage("Plugin canceled - the active image is not saved as a file (e.g. it was created or duplicated in Fiji)!"
+							+ "\nSave the image and retry running CiliaQ_Preparator...");
+					return;
+				}
 				name [0] = info.fileName;	//get name
 				dir [0] = info.directory;	//get directory
 				tasks = 1;
 			}catch(Exception e) {
-				new WaitForUserDialog("Unclear error when loading the active image!"
+				stopMessage("Unclear error when loading the active image!"
 						+ "\nTry to restart FIJI, open the image again, and run CiliaQ_Preparator again!"
-						+ "\nDetailed debugging information printed to LOG window.").show();
+						+ "\nDetailed debugging information printed to LOG window.");
 
 				IJ.log("Detailed debugging information:"
 						+ "\nError message: " + e.getMessage()
@@ -545,7 +551,7 @@ public void run(String arg) {
 		}else if(selectedTaskVariant.equals(taskVariant[2])){	// all open images
 			try {
 				if(WindowManager.getIDList()==null){
-					new WaitForUserDialog("Plugin canceled - no image open in FIJI!").show();
+					stopMessage("Plugin canceled - no image open in FIJI!");
 					return;
 				}
 				int IDlist [] = WindowManager.getIDList();
@@ -553,12 +559,17 @@ public void run(String arg) {
 				if(tasks == 1){
 					selectedTaskVariant=taskVariant[0];
 					if(WindowManager.getCurrentImage().changes) {
-						new WaitForUserDialog("Plugin canceled - the active image had unsaved changes!"
+						stopMessage("Plugin canceled - the active image had unsaved changes!"
 								+ "\nCiliaQ can only process images that are saved!"
-								+ "\nSave the image and retry running CiliaQ_Preparator...").show();
+								+ "\nSave the image and retry running CiliaQ_Preparator...");
 						return;
 					}
 					FileInfo info = WindowManager.getCurrentImage().getOriginalFileInfo();
+					if(info == null || info.directory == null || info.directory.isEmpty()){	// New in V0.2.1, e.g. created or duplicated in Fiji
+						stopMessage("Plugin canceled - the active image is not saved as a file (e.g. it was created or duplicated in Fiji)!"
+								+ "\nSave the image and retry running CiliaQ_Preparator...");
+						return;
+					}
 					name [0] = info.fileName;	//get name
 					dir [0] = info.directory;	//get directory
 				}else{
@@ -568,21 +579,26 @@ public void run(String arg) {
 					for(int i = 0; i < tasks; i++){
 						allImps[i] = WindowManager.getImage(IDlist[i]);
 						if(allImps[i].changes) {
-							new WaitForUserDialog("Plugin canceled - one active image had unsaved changes!"
+							stopMessage("Plugin canceled - one active image had unsaved changes!"
 									+ "\nCiliaQ can only process images that are saved!"
 									+ "\nSave the image and retry running CiliaQ_Preparator..."
-									+ "\n\nTitle of the unsaved image: " + allImps[i].getTitle()).show();
+									+ "\n\nTitle of the unsaved image: " + allImps[i].getTitle());
 							return;
 						}
 						FileInfo info = allImps[i].getOriginalFileInfo();
+						if(info == null || info.directory == null || info.directory.isEmpty()){	// New in V0.2.1, e.g. created or duplicated in Fiji
+							stopMessage("Plugin canceled - one open image is not saved as a file (e.g. it was created or duplicated in Fiji)!"
+									+ "\nSave the image and retry running CiliaQ_Preparator..." + "\n\nTitle of the image: " + allImps[i].getTitle());
+							return;
+						}
 						name [i] = info.fileName;	//get name
 						dir [i] = info.directory;	//get directory
 					}		
 				}
 			}catch(Exception e) {
-				new WaitForUserDialog("Unclear error when loading the active images!"
+				stopMessage("Unclear error when loading the active images!"
 						+ "\nTry to restart FIJI, open the images again, and run CiliaQ_Preparator again!"
-						+ "\nDetailed debugging information printed to LOG window.").show();
+						+ "\nDetailed debugging information printed to LOG window.");
 				
 				IJ.log("Detailed debugging information:"
 						+ "\nError message: " + e.getMessage()
@@ -654,6 +670,7 @@ public void run(String arg) {
 //						filesList += name[j] + "\t" + dir[j] + "\t" + series[j] + "\t" + totSeries[j] + "\n";
 					}
 				}
+				closeReaders(imps);	// New in V0.2.1: a virtual image keeps its file open until its reader is closed
 			} catch (Throwable e) {
 				// New in V0.2.1: a cancelled macro or a stopped thread ends the run
 				rethrowIfRunEnds(e);
@@ -699,7 +716,8 @@ public void run(String arg) {
 			robo = new Robot();
 		} catch (AWTException e) {
 			keepAwake = false;
-			progress.notifyMessage("Robot that moves the mouse to keep the computer awake could not be hired - Stay-awake mode was disabled.", ProgressReporter.NOTIFICATION);
+			progress.notifyMessage("Robot that moves the mouse to keep the computer awake could not be hired - Stay-awake mode was disabled.",
+					ProgressReporter.LOG);
 		}
    	}
 	
@@ -832,7 +850,7 @@ public void run(String arg) {
 		/******************************************************************
 		*** 						Processing							***	
 		*******************************************************************/
-		   	double thresholds [], threshold, thresholdsHyst [][];
+		   	double threshold, thresholdsHyst [][];
 		   	procImp = imp.duplicate();
 		   	procImp.setCalibration(imp.getCalibration());
 		   	procImp.deleteRoi();
@@ -842,7 +860,7 @@ public void run(String arg) {
 			// V0.2.0: a plain text collector rather than ij.text.TextPanel, whose AWT
 			// Scrollbars cannot be constructed under --headless.
 			TextCollector tp1 = new TextCollector("results");
-			addSettingsBlockToPanel(tp1,  startDate, name[task], totSeries[task]>1, series[task], imp);
+			addSettingsBlockToPanel(tp1,  startDate, name[task], totSeries[task]>1, series[task]);
 			
 			/*	V0.2.1: Report any unrecognised macro values
 			 *	(the Log, as macro runs use ConsoleProgress, and the CQP.txt report's "Notes and errors").
@@ -1093,6 +1111,13 @@ public void run(String arg) {
 		   				progress.updateBarText("Phansalkar local threshold for channel "
 		   						+ channelIDs [c] + " ...");
 		   				tp1.append("Threshold(s) for channel " + channelIDs [c]);
+		   				if(CiliaQPrepStatistics.countNonFinite(tempImp) > 0){
+		   					// New in V0.2.1: see nonFiniteMessage
+		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] + ": "
+		   							+ nonFiniteMessage(tempImp, "PHANSALKAR normalises by the minimum and maximum of the stack, so its threshold would not be a number")
+		   							+ "\nThis image was not processed - no output was written.", ProgressReporter.ERROR);
+		   					break running;
+		   				}
 		   				if(phansalkarSettings [c] == null)
 		   					phansalkarSettings [c] = ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.initDefault();
 		   				ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings ps = phansalkarSettings [c];
@@ -1150,6 +1175,13 @@ public void run(String arg) {
 		   				progress.updateBarText("Determine fraction-of-range threshold for channel "
 		   						+ channelIDs [c] + " ...");
 		   				tp1.append("Threshold(s) for channel " + channelIDs [c]);
+		   				if(CiliaQPrepStatistics.countNonFinite(tempImp) > 0){
+		   					// New in V0.2.1: see nonFiniteMessage
+		   					progress.notifyMessage("Task " + (task+1) + "/" + tasks + ", channel " + channelIDs [c] + ": "
+		   							+ nonFiniteMessage(tempImp, "FRACTION takes percentiles of all voxels, so its threshold would be infinite or not a number")
+		   							+ "\nThis image was not processed - no output was written.", ProgressReporter.ERROR);
+		   					break running;
+		   				}
 		   				if(fractionSettings [c] == null)
 		   					fractionSettings [c] = ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.initDefault();
 		   				String fwarn = fractionSettings [c].rangeWarning(localMethod);
@@ -1521,8 +1553,7 @@ public void run(String arg) {
 			/******************************************************************
 			*** 							Finish							***	
 			*******************************************************************/	
-			System.gc();		
-			processingDone = true;
+			System.gc();
 			break running;				
 		}}catch(Throwable e){
 			// New in V0.2.1: a cancelled macro or a stopped thread ends the run, after the clean-up below
@@ -1576,6 +1607,7 @@ public void run(String arg) {
 		progress.setBar(1.0);
 		progress.moveTask(task);
 	}}finally{
+		processingDone = true;
 		Recorder.record = recordPref;
 		Prefs.blackBackground = backgroundPref;		
 	}	
@@ -1646,9 +1678,8 @@ private boolean importSettings() {
 	//read general settings
 	logImport("READING PREFERENCES:");
 	nChannels = 0;
-	try {
-		FileReader fr = new FileReader(settingsFile);
-		BufferedReader br = new BufferedReader(fr);
+	try (
+		BufferedReader br = new BufferedReader(new FileReader(settingsFile))) {
 		String line = "";							
 		reading: while(true){
 			try{
@@ -1662,38 +1693,51 @@ private boolean importSettings() {
 			
 			if(line.contains("Number format:")) {
 				// New in V0.2.1: the number format the file was written with (older files keep the current one)
+				boolean formatKnown = false;
 				for(int i = 0; i < nrFormats.length; i++){
-					if(line.contains(nrFormats [i]))	setNumberFormat(nrFormats [i]);
+					if(line.contains(nrFormats [i])){
+						setNumberFormat(nrFormats [i]);
+						formatKnown = true;
+					}
+				}
+				if(!formatKnown && line.startsWith("\tNumber format:")){
+					// an unknown name is refused, as in the channel settings
+					importProblem(settingsFile, "The file names a number format this version does not know:\n" + line.trim()
+							+ "\nNo preferences were loaded.");
+					return false;
 				}
 				logImport("Number format = " + ChosenNumberFormat);
 			}
 			
 			if(line.contains("Segmentation style")) {
+				boolean styleKnown = false;
 				for(int i = 0; i < intensityVariant.length; i ++) {
 					if(line.contains(intensityVariant [i])) {
 						chosenImageStyle = intensityVariant [i];
+						styleKnown = true;
 					}
 				}
-				
-				if(chosenImageStyle.equals(intensityVariant [0])){
-					// If keep intensity in foreground pixels selected
-					keepIntensities = true;
+				if(!styleKnown && line.startsWith("\tSegmentation style:")){
+					// New in V0.2.1: an unknown name is refused, not replaced by the default
+					importProblem(settingsFile, "The file names a segmentation style this version does not know:\n" + line.trim()
+							+ "\nNo preferences were loaded.");
+					return false;
 				}
 				
-				if(chosenImageStyle.equals(intensityVariant [2])){
-					// New in V0.2.1: True if zero or NaN voxels post processing selected to be always background
-					zeroStaysBackground = true;					
-				}
+				// If keep intensity in foreground pixels selected; New in V0.2.1: assigned both ways, since the default is true
+				keepIntensities = chosenImageStyle.equals(intensityVariant [0]);
+
+				// New in V0.2.1: True if zero or NaN voxels post processing selected to be always background
+				zeroStaysBackground = chosenImageStyle.equals(intensityVariant [2]);
 
 				logImport("Segmentation style = " + chosenImageStyle);
 			}
 			
-			if(line.contains("Segmented channel")) {
+			// New in V0.2.1: the settings line (one tab), not any line with these words, e.g. an image name
+			if(line.startsWith("	Segmented channel")) {
 				nChannels ++;
 			}
 		}					
-		br.close();
-		fr.close();
 	}catch (IOException e) {
 		importProblem(settingsFile, "Problem with loading preferences");
 		e.printStackTrace();
@@ -1714,9 +1758,8 @@ private boolean importSettings() {
 	boolean channelReading = false;
 	int actualC = -1;
 	String tempString;
-	try {
-		FileReader fr = new FileReader(settingsFile);
-		BufferedReader br = new BufferedReader(fr);
+	boolean footerRead = false;	// New in V0.2.1: Checking that the file's last section ("Plug-in version:") was read, see below
+	try (BufferedReader br = new BufferedReader(new FileReader(settingsFile))) {
 		String line = "";							
 		reading: while(true){
 			try{
@@ -1728,7 +1771,7 @@ private boolean importSettings() {
 				break reading;
 			}
 			
-			if(line.contains("Segmented channel")) {
+			if(line.startsWith("	Segmented channel")) {
 				channelReading = true;
 				actualC++;
 			}else if(isUnindentedHeader(line) && (
@@ -1802,9 +1845,16 @@ private boolean importSettings() {
 					histogram16bit [actualC] = true;
 					logImport("C" + actualC + ": full 16-bit histogram");
 				}
-				if(line.contains("Stack processing:")){	// New V0.2.1: methods whose block precedes this line (EXPANSION, FRACTION)
+				if(line.contains("Stack processing:")){
+					// New V0.2.1: methods whose block precedes this line (EXPANSION, FRACTION)
 					String sm = matchStackMethod(line);
 					if(sm != null)	chosenStackMethods [actualC] = sm;
+					else if(!line.contains("not applicable")){
+						// New in V0.2.1: an unknown name is refused, not replaced by the default
+						importProblem(settingsFile, "The file names a stack handling this version does not know:\n"
+								+ line.trim () + "\nNo preferences were loaded.");
+						return false;
+					}
 					logImport("C" + actualC + ": stack m " + chosenStackMethods [actualC]);
 				}
 				
@@ -1844,13 +1894,14 @@ private boolean importSettings() {
 						}
 						
 						//Bug fixed in V0.2.0 (IsoData and IJ_IsoData could be confused with prior method)
-						String saved = line.substring(line.lastIndexOf("	")+1).trim();
-						for(int a = 0; a < ProcessSettings.thrAlgorithms.length; a++) {
-							if(saved.equalsIgnoreCase(ProcessSettings.thrAlgorithms[a])) {
-								cannySettings [actualC].setLowThresholdAlgorithm(ProcessSettings.thrAlgorithms [a]);
-								break;
-							}
+						String saved = matchName(line.substring(line.lastIndexOf("	")+1), ProcessSettings.thrAlgorithms);
+						if(saved == null){
+							// New in V0.2.1: an unknown name is refused, not replaced by the default
+							importProblem(settingsFile, "The file names a Canny 3D low threshold method this version does not know:\n"
+									+ line.trim() + "\nNo preferences were loaded.");
+							return false;
 						}
+						cannySettings [actualC].setLowThresholdAlgorithm(saved);
 						
 						if(cannySettings [actualC].getLowThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
@@ -1873,13 +1924,14 @@ private boolean importSettings() {
 						}
 
 						//Bug fixed in V0.2.0 (IsoData and IJ_IsoData could be confused with prior method)
-						saved = line.substring(line.lastIndexOf("	")+1).trim();
-						for(int a = 0; a < ProcessSettings.thrAlgorithms.length; a++) {
-							if(saved.equalsIgnoreCase(ProcessSettings.thrAlgorithms[a])) {
-								cannySettings [actualC].setHighThresholdAlgorithm(ProcessSettings.thrAlgorithms [a]);
-								break;
-							}
+						saved = matchName(line.substring(line.lastIndexOf("	")+1), ProcessSettings.thrAlgorithms);
+						if(saved == null){
+							// New in V0.2.1: an unknown name is refused, not replaced by the default
+							importProblem(settingsFile, "The file names a Canny 3D high threshold method this version does not know:\n"
+									+ line.trim() + "\nNo preferences were loaded.");
+							return false;
 						}
+						cannySettings [actualC].setHighThresholdAlgorithm(saved);
 						
 						if(cannySettings [actualC].getHighThresholdAlgorithm().equals(ProcessSettings.thrAlgorithms[0])) {
 							line = br.readLine();
@@ -1906,13 +1958,14 @@ private boolean importSettings() {
 						}
 						
 						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
-						String saved = line.substring(line.lastIndexOf("	")+1).trim();
-						for(int a = 0; a < hystAlgorithms.length; a++) {
-							if(saved.equalsIgnoreCase(hystAlgorithms[a])) {
-								chosenLowAlg [actualC] = (hystAlgorithms [a]);
-								break;
-							}
+						String saved = matchName(line.substring(line.lastIndexOf("	")+1), hystAlgorithms);
+						if(saved == null){
+							// New in V0.2.1: an unknown name is refused, not replaced by the default
+							importProblem(settingsFile, "The file names a hysteresis low threshold method this version does not know:\n"
+									+ line.trim() + "\nNo preferences were loaded.");
+							return false;
 						}
+						chosenLowAlg [actualC] = saved;
 						
 						logImport("C" + actualC + ": Low Thr method" + chosenLowAlg [actualC]);
 						if(chosenLowAlg [actualC].equals(hystAlgorithms[0])) {
@@ -1936,13 +1989,14 @@ private boolean importSettings() {
 						}
 						
 						//Bug fixed in V0.2.0 (exact match; IsoData/IJ_IsoData substring safety)
-						saved = line.substring(line.lastIndexOf("	")+1).trim();
-						for(int a = 0; a < hystAlgorithms.length; a++) {
-							if(saved.equalsIgnoreCase(hystAlgorithms[a])) {
-								chosenHighAlg [actualC] = (hystAlgorithms [a]);
-								break;
-							}
+						saved = matchName(line.substring(line.lastIndexOf("	")+1), hystAlgorithms);
+						if(saved == null){
+							// New in V0.2.1: an unknown name is refused, not replaced by the default
+							importProblem(settingsFile, "The file names a hysteresis high threshold method this version does not know:\n"
+									+ line.trim() + "\nNo preferences were loaded.");
+							return false;
 						}
+						chosenHighAlg [actualC] = saved;
 						
 						logImport("C" + actualC + ": High Thr method" + chosenHighAlg [actualC]);
 						if(chosenHighAlg [actualC].equals(hystAlgorithms[0])) {
@@ -1964,7 +2018,14 @@ private boolean importSettings() {
 							line = br.readLine();	
 							if(line == null){importProblem(settingsFile, "Reading problem with stack method"); truncated = true; break reading;}
 							String smMatch = matchStackMethod(line);
-							if(smMatch != null)	chosenStackMethods [actualC] = smMatch;
+							if(smMatch != null) {
+								chosenStackMethods [actualC] = smMatch;
+							} else if(line.contains("Stack processing")){
+								// New in V0.2.1: an unknown name is refused
+								importProblem(settingsFile, "The file names a stack handling this version does not know:\n" + line.trim()
+										+ "\nNo preferences were loaded.");
+								return false;
+							}
 							logImport("C" + actualC + ": stack m " + chosenStackMethods [actualC]);	
 						}
 					}else if(line.contains("CUSTOM threshold")) {
@@ -1984,20 +2045,31 @@ private boolean importSettings() {
 						int s = line.indexOf("based on the ");
 						int e = line.indexOf(" threshold algorithm");
 						if(s >= 0 && e > s){
-							String savedAlg = line.substring(s + "based on the ".length(), e).trim();
-							for(int a = 0; a < algorithm.length; a++) {
-								if(savedAlg.equalsIgnoreCase(algorithm[a])) {
-									chosenAlgorithms [actualC] = algorithm [a];
-									break;
-								}
+							String savedAlg = matchName(line.substring(s + "based on the ".length(), e), algorithm);
+							if(savedAlg == null){	// New in V0.2.1: an unknown name is refused, not replaced by the default
+								importProblem(settingsFile, "The file names a threshold method this version does not know:\n" + line.trim()
+										+ "\nNo preferences were loaded.");
+								return false;
 							}
+							chosenAlgorithms [actualC] = savedAlg;
 						}
 						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);	
 						
 						line = br.readLine();	
-						if(line == null){importProblem(settingsFile, "Reading problem with stack method."); truncated = true; break reading;}
+						if (line == null) {
+							importProblem(settingsFile, "Reading problem with stack method.");
+							truncated = true;
+							break reading;
+						}
 						String smMatch2 = matchStackMethod(line);
-						if(smMatch2 != null)	chosenStackMethods [actualC] = smMatch2;
+						if(smMatch2 != null) {
+							chosenStackMethods [actualC] = smMatch2;
+						}else if(line.contains("Stack processing")){
+							// New in V0.2.1: an unknown name is refused
+							importProblem(settingsFile, "The file names a stack handling this version does not know:\n"
+								+ line.trim() + "\nNo preferences were loaded.");
+							return false;
+						}
 						logImport("C" + actualC + ": stack m " + chosenStackMethods [actualC]);
 					}else if(line.contains(ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME)) {
 						chosenAlgorithms [actualC] = ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME;
@@ -2047,7 +2119,12 @@ private boolean importSettings() {
 						ridgeSettings[actualC] = ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.initDefault();
 						java.util.HashMap<String, String> kv = readIndentedBlock(br);
 						ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs = ridgeSettings[actualC];
-						readRidgeBlock(kv, rs);	// New V0.2.1: shared with the seed tool
+						String ridgeUnknown = readRidgeBlock(kv, rs);	// New V0.2.1: shared with the seed tool
+						if(ridgeUnknown != null){
+							importProblem(settingsFile, "The file names a ridge detection setting this version does not know:\n"
+									+ ridgeUnknown + "\nNo preferences were loaded.");
+							return false;
+						}
 						logImport("C" + actualC + ": ridge w=" + rs.lineWidth + " sens=" + rs.sensitivity
 								+ " minLen=" + rs.minLength + " override=" + rs.advancedOverride
 								+ " z=" + rs.zMethodToken() + " copy=" + rs.copyRule + " kink=" + rs.kinkRule
@@ -2055,30 +2132,51 @@ private boolean importSettings() {
 								+ " parallel=" + rs.parallelRule + " turnRelease=" + rs.turnRelease);
 					}else if(line.contains("EXPANSION from seeds")) {
 						chosenAlgorithms [actualC] = EXPANSION_SEEDS;
-						logImport("C" + actualC + ": segment with " + chosenAlgorithms [actualC]);
-						expansionSettings [actualC] =
-								ciliaQ_Prep_jnh.expansion.ExpansionSettings.initDefault();
-						java.util.HashMap<String,String> kv = readIndentedBlock(br);
-						ciliaQ_Prep_jnh.expansion.ExpansionSettings es = expansionSettings [actualC];
+						logImport("C" + actualC + ": segment with " + chosenAlgorithms[actualC]);
+						expansionSettings[actualC] = ciliaQ_Prep_jnh.expansion.ExpansionSettings.initDefault();
+						java.util.HashMap<String, String> kv = readIndentedBlock(br);
+						ciliaQ_Prep_jnh.expansion.ExpansionSettings es = expansionSettings[actualC];
+						
 						String src = blockValue(kv, "Seed source");
-						if(src != null){
-							for(int a = 0; a < ciliaQ_Prep_jnh.expansion.ExpansionSettings.seedSources.length; a++){
-								if(src.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.seedSources [a])){
-									es.seedSource = ciliaQ_Prep_jnh.expansion.ExpansionSettings.seedSources [a];
-									break;
-								}
+						if (src != null) {
+							es.seedSource = matchName(src, ciliaQ_Prep_jnh.expansion.ExpansionSettings.seedSources);
+							if (es.seedSource == null) {
+								// New in V0.2.1: an unknown name is refused, not replaced by the default
+								importProblem(settingsFile, "The file names a seed source this version does not know:\n"
+										+ src + "\nNo preferences were loaded.");
+								return false;
 							}
 						}
+						
 						String lowAlg = blockValue(kv, "Threshold for the object extent");
-						if(lowAlg != null)	es.lowThrAlgorithm = matchThrAlgorithm(lowAlg, es.lowThrAlgorithm);
+						if (lowAlg != null)
+							es.lowThrAlgorithm = matchName(lowAlg, ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms);
+						if (es.lowThrAlgorithm == null) {
+							importProblem(settingsFile, "The file names a threshold method this version does not know: "
+									+ lowAlg + "\nNo preferences were loaded.");
+							return false;
+						}
 						es.customLowThr = blockDouble(kv, "Manually selected threshold", es.customLowThr);
-						es.minPieceSize = (int) Math.round(blockDouble(kv,
-								"Minimum object size after splitting", es.minPieceSize));
-						/*	Ridge seeds carry the full ridge settings (block "Ridge seed settings:"),
-						 *	written with the same labels as RIDGE DETECTION, so the same reader applies. */
-						readRidgeBlock(kv, es.ridge);
+						es.minPieceSize = (int) Math.round(blockDouble(kv, "Minimum object size after splitting", es.minPieceSize));
+						
+						/*
+						 * Ridge seeds carry the full ridge settings (block "Ridge seed settings:"),
+						 * written with the same labels as RIDGE DETECTION, so the same reader applies.
+						 */
+						String seedRidgeUnknown = readRidgeBlock(kv, es.ridge);
+						if(seedRidgeUnknown != null){
+							importProblem(settingsFile, "The file names a ridge seed setting this version does not know:\n"
+									+ seedRidgeUnknown + "\nNo preferences were loaded.");
+							return false;
+						}
 						String seedAlg = blockValue(kv, "High core seed - seed threshold");
-						if(seedAlg != null)	es.seedThrAlgorithm = matchThrAlgorithm(seedAlg, es.seedThrAlgorithm);
+						if (seedAlg != null)
+							es.seedThrAlgorithm = matchName(seedAlg, ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms);
+						if (es.seedThrAlgorithm == null) {
+							importProblem(settingsFile, "The file names a threshold method this version does not know: "
+									+ seedAlg + "\nNo preferences were loaded.");
+							return false;
+						} // New in V0.2.1
 						es.customSeedThr = blockDouble(kv, "High core seed - manually selected seed threshold",
 								es.customSeedThr);
 						es.spotDiameter = blockDouble(kv, "Spot seed - expected diameter", es.spotDiameter);
@@ -2109,15 +2207,15 @@ private boolean importSettings() {
 						 *	channel kept whatever chosenAlgorithms happened to hold. Loading a file
 						 *	written by a NEWER Preparator into an older one does exactly this, so say so
 						 *	instead of segmenting with the wrong method. */
-						IJ.error(PLUGIN_NAME + ": the settings file names a segmentation method this"
-								+ " version does not know:\n" + line.trim()
-								+ "\nNo preferences were loaded.");
+						importProblem(settingsFile, "The file names a segmentation method this version does not know:\n"
+								+ line.trim() + "\nNo preferences were loaded.");
 						return false;
 					}
 				}
 			}
 			
 			if(line.contains("Plug-in version:")) {
+				footerRead = true;
 				String version = line.substring(line.lastIndexOf("V"));
 				IJ.log("Loaded settings stem from a CiliaQ Preparator run with Version " + version + ".");
 
@@ -2223,10 +2321,14 @@ private boolean importSettings() {
 				}
 			}
 		}					
-		br.close();
-		fr.close();
 		if(truncated){
 			return false;	// New V0.2.1: importProblem has said where the file ends (see the flag)
+		}
+		if(!footerRead){
+			// New in V0.2.1: a file cut off anywhere before its last section, e.g. inside a method's block
+			importProblem(settingsFile, "The file ends before its last line (\"Plug-in version: ...\"): it may be cut off,"
+					+ " or it is no CiliaQ Preparator settings file.\nNo preferences were loaded.");
+			return false;
 		}
 	}catch (Exception e) {
 		importProblem(settingsFile, "Problem with loading preferences (possibly a malformed or truncated settings file).");
@@ -2277,13 +2379,11 @@ private File redirectTifToTxt(File chosen){
  * Modification in v0.2.1:
  *	Read the value of "key=..." out of a macro option string.
  *
- *	Reason for the guard at the end of this method: this plugin has two kinds of
- *	macro option. Ones with a value, "c1-ridge-width=6", are read HERE. Bare flags with no value,
- *	"c1-ridge-no-crossings", MUST be read with macroFlag instead.
- *
- *	Mixing them up is silent: "resolveCrossings = macroValue(...) == null" is always TRUE for a bare flag,
- *	because this method looks for "key=" and finds nothing. So if the key turns out to be present as a bare
- *	token, this method SAYS SO rather than returning null and letting the caller guess.
+ *	Reason for the check when the key is not found: this plugin has two kinds of macro option. Ones with
+ *	a value, "c1-ridge-width=6", are read HERE. Bare flags with no value, "c1-ridge-no-crossings", are read
+ *	with macroFlag. A key that needs a value but is written without one ("c1-ridge-width") is not found,
+ *	because this method looks for "key=", so its setting would be ignored without a word. This method
+ *	throws a macro warning instead.
  */
 private String macroValue(String options, String key){
 	if(options == null) return null;
@@ -2291,8 +2391,8 @@ private String macroValue(String options, String key){
 	// Locate the first occurrence of "key=".
 	int at = options.indexOf(key + "=");
 	
-	// Guard against a key that is a suffix of a longer key, e.g. "c1-blur=" inside
-	// "c11-blur=". A valid key must either start the string or be preceded by a space;
+	// Guard against a key that is the end of a longer key, e.g. "nr=" inside "c1-nr=".
+	// A valid key must either start the string or be preceded by a space;
 	// if the match sits mid-token, keep searching for the next occurrence.
 	while(at > 0 && options.charAt(at - 1) != ' '){
 		at = options.indexOf(key + "=", at + 1);
@@ -2301,14 +2401,12 @@ private String macroValue(String options, String key){
 	// Key not present (either never found, or only ever found mid-token).
 	if(at < 0){
 		/*
-		 * Before giving up: is the key there as a BARE FLAG? Then the caller used the wrong helper, and
-		 * returning null would hide it - see this method's comment. Warn rather than fail, because the
-		 * value is still recoverable by using macroFlag, and a warning reaches both the log and the
+		 * Before giving up: is the key there without a value, as a bare flag? Then the macro wrote a value key
+		 * without its value, and the setting is ignored: say so. The warning reaches both the log and the
 		 * metadata file via macroWarnings.
 		 */
 		if(macroFlag(options, key)){
-			String m = "'" + key + "' is a flag with no value, so it must be read with macroFlag,"
-					+ " not macroValue - this is a bug in the plugin, please report it";
+			String m = "'" + key + "' needs a value (" + key + "=...) - written without one, it was ignored";
 			addMacroWarning(m);
 		}
 		return null;
@@ -2368,7 +2466,7 @@ private double macroDouble(String options, String key, double fallback){
  *
  * Delegates to {@link #macroDouble} and rounds the result to the nearest integer, so that
  * a value recorded with a decimal part (e.g. "3.0") still reads back correctly. Shares all
- * of macroDouble's tolerance: missing, empty or malformed values fall back silently.
+ * of macroDouble's tolerance: missing or empty values fall back, a malformed one with a macro warning.
  *
  * @param options  the full macro option string (may be null)
  * @param key      the option name, without the trailing '='
@@ -2449,8 +2547,19 @@ private void warnKeysIgnoredBySettingsFile(String options){
 	// the file's "Number format:" line overrides number-format=, so it is named then; files without the line keep the macro's
 	boolean fileHasFormat = false;
 	try{
-		fileHasFormat = new String(java.nio.file.Files.readAllBytes(new File(macroValue(options, "settings")).toPath()),
-				java.nio.charset.StandardCharsets.ISO_8859_1).contains("Number format:");
+		// the file importSettings reads: a _CQP.tif stands for its _CQP.txt (redirectTifToTxt); line by line, not the whole file
+		File f = new File(macroValue(options, "settings"));
+		String p = f.getPath(), lower = p.toLowerCase();
+		if((lower.endsWith(".tif") || lower.endsWith(".tiff")) && new File(p.substring(0, p.lastIndexOf(".")) + ".txt").exists()){
+			f = new File(p.substring(0, p.lastIndexOf(".")) + ".txt");
+		}
+		if(f.getPath().toLowerCase().endsWith(".txt")){
+			try(BufferedReader r = new BufferedReader(new FileReader(f))){
+				for(String l = r.readLine(); l != null && !fileHasFormat; l = r.readLine()){
+					fileHasFormat = l.contains("Number format:");
+				}
+			}
+		}
 	}catch(Exception e){
 		// an unreadable file is reported where it is read; here it only decides the warning
 		fileHasFormat = false;
@@ -2506,7 +2615,7 @@ private void addMacroWarning(String msg){
  *   1. If the key is absent, the fallback is returned immediately.
  *   2. An exact match against the allowed list is preferred.
  *   3. Failing that, a unique substring match is accepted, so abbreviations still work
- *      (e.g. "MIP" for the full stack-method label). If the substring matches more than
+ *      (e.g. "projection" for the maximum-projection label). If the substring matches more than
  *      one allowed value it is treated as ambiguous and rejected.
  * If nothing matches, a message is logged and the fallback is returned, so an unknown or
  * ambiguous value degrades gracefully instead of failing the run.
@@ -2683,16 +2792,11 @@ private boolean enterSettings() {
 		String chosenStackMethodsTemp = gd.getNextChoice();
 		boolean separateTimestepsTemp = gd.getNextBoolean();
 		boolean histogram16bitTemp = gd.getNextBoolean();
-		nChannels = nChannels + (int) gd.getNextNumber();
+		nChannels = nChannels + Math.max(0, (int) gd.getNextNumber());	// New in V0.2.1: a negative number adds no channel (it crashed)
 		
 		chosenImageStyle = gd.getNextChoice();
-		if(chosenImageStyle.equals(intensityVariant [0])){
-			keepIntensities = true;
-		}
-		if(chosenImageStyle.equals(intensityVariant [2])){
-			// New in V0.2.1
-			zeroStaysBackground = true;
-		}	
+		keepIntensities = chosenImageStyle.equals(intensityVariant [0]);	// New in V0.2.1: assigned both ways, since the default is true
+		zeroStaysBackground = chosenImageStyle.equals(intensityVariant [2]);	// New in V0.2.1	
 		
 		// Introduced for init in Version V0.2.0
 		initChannelArrays(nChannels);
@@ -2719,6 +2823,11 @@ private boolean enterSettings() {
 	
 	//read and process variables--------------------------------------------------
 	if (gd.wasCanceled()) return false;
+	if (gd.invalidNumber()) {
+		// New in V0.2.1, see invalidNumberMessage
+		IJ.error(PLUGIN_NAME, invalidNumberMessage(gd));
+		return false;
+	}
 	
 	for(int c = 1; c < nChannels; c++) {
 		GenericDialog gd2 = new GenericDialog(PLUGIN_NAME + " on " + System.getProperty("os.name") + " - set parameters for channel " + (c+1));	
@@ -2773,9 +2882,27 @@ private boolean enterSettings() {
 		histogram16bit [c] = gd2.getNextBoolean();		
 		//read and process variables--------------------------------------------------
 		if (gd2.wasCanceled()) return false;
+		if (gd2.invalidNumber()) {
+			// New in V0.2.1, see invalidNumberMessage
+			IJ.error(PLUGIN_NAME, invalidNumberMessage(gd2));
+			return false;
+		}
 	}	
 	System.gc();
 	return true;
+}
+
+/**
+ * The message for a dialog in which a number field holds no number, or null if all its numbers are valid.
+ * ImageJ reads such a field as NaN without a message (e.g. "5,5", with a comma), and NaN passes every check of the form
+ * "value <= 0", so the run would go on with a setting switched off or meaningless. The settings dialogs refuse it.
+ * 
+ * New in V0.2.1: 
+ */
+public static String invalidNumberMessage(GenericDialog gd){
+	if(!gd.invalidNumber())	return null;
+	return gd.getErrorMessage() + " - invalid entry, possibly a typo or a comma as decimal separator."
+			+ "\nPlease type numbers with a dot, e.g. 5.5, and start again.";
 }
 
 /** New V0.2.1: a setting that makes the run meaningless - the run will not start. <brief> is the line shown in the
@@ -2877,20 +3004,20 @@ private boolean validateSettings(){
 			}
 		}
 
-		// Radii and sigmas.
-		if(medianFilter [c] && medianRadius [c] <= 0){
+		// Radii and sigmas. Written as !(x > 0), so that NaN (no number) is refused too.
+		if(medianFilter [c] && !(medianRadius [c] > 0)){
 			refuse("Channel " + channelIDs [c] + ": the median filter radius must be > 0.", null);
 		}
-		if(preBlur [c] && preBlurRadius [c] <= 0){
+		if(preBlur [c] && !(preBlurRadius [c] > 0)){
 			refuse("Channel " + channelIDs [c] + ": the pre-segmentation blur radius must be > 0.", null);
 		}
-		if(subtractBackground [c] && subtractBGRadius [c] <= 0){
+		if(subtractBackground [c] && !(subtractBGRadius [c] > 0)){
 			refuse("Channel " + channelIDs [c] + ": the rolling-ball radius must be > 0.", null);
 		}
-		if(divideBackground [c] && divideBGRadius [c] <= 0){
+		if(divideBackground [c] && !(divideBGRadius [c] > 0)){
 			refuse("Channel " + channelIDs [c] + ": the divide-by-background radius must be > 0.", null);
 		}
-		if(additionalBlur [c] && additionalBlurRadius [c] <= 0){
+		if(additionalBlur [c] && !(additionalBlurRadius [c] > 0)){
 			refuse("Channel " + channelIDs [c] + ": the Gaussian blur radius must be > 0.", null);
 		}
 
@@ -2903,7 +3030,8 @@ private boolean validateSettings(){
 				"It divides by a blurred copy of the image. Where the background of this channel is (close to) zero -"
 				+ "\nfor example in a channel that was already background-subtracted - the result is infinite or"
 				+ "\nundefined, and such voxels pass every threshold, so the background becomes foreground there."
-				+ "\nPrefer 'Subtract Background' for such images.");
+				+ "\nPrefer 'Subtract Background' for such images."
+				+ divideNote(c)); // New in V0.2.1: divideNote
 		}
 
 		// Two blurs in a row is legal but rarely intended.
@@ -2924,6 +3052,11 @@ private boolean validateSettings(){
 				+ "). Smoothing at the scale of the background estimate largely cancels the"
 				+ " background subtraction. A pre-blur of about a quarter of the rolling-ball"
 				+ " radius is a reasonable starting point.");
+		}
+
+		if(chosenAlgorithms [c].equals("CUSTOM threshold") && Double.isNaN(customThr [c])){
+			// New in V0.2.1
+			refuse("Channel " + channelIDs [c] + ": the CUSTOM threshold is not a number.", null);
 		}
 
 		/*	CUSTOM threshold with the default value is almost always an oversight. Changed V0.2.1: the text said every
@@ -2989,12 +3122,36 @@ private boolean validateSettings(){
 	return showCheckResults();
 }
 
+/**
+ * For the Divide by Background warning (validateSettings), we notify about what voxels that are not a number
+ * or infinite mean for the method and the segmentation style of channel c:
+ * 	- FRACTION, PHANSALKAR and ridge detection of dark lines (also as ridge seeds) cannot work with them, so an image that
+ * 	  has them is not processed (nonFiniteMessage);
+ * 	- with the other thresholds, the third segmentation style keeps the voxels that are not a number out of the mask.
+ */
+private String divideNote(int c){
+	String alg = chosenAlgorithms [c];
+	boolean darkRidge = (RIDGE_DETECTION.equals(alg) && ridgeSettings [c] != null && ridgeSettings [c].darkLine)
+			|| (EXPANSION_SEEDS.equals(alg) && expansionSettings [c] != null && expansionSettings [c].ridge.darkLine
+				&& ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE.equals(expansionSettings [c].seedSource));
+	if(darkRidge || ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(alg)
+			|| ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(alg)){
+		return "\n" + (darkRidge ? "Ridge detection of dark lines" : alg) + " cannot work with such voxels: an image that has"
+				+ " them is not processed. Try other preprocessing, e.g. Subtract Background.";
+	}
+	if(!zeroStaysBackground && (usesAutoThresholds(alg) || "CUSTOM threshold".equals(alg))){
+		return "\nThe segmentation style '" + intensityVariant [2] + "' keeps the voxels that are not a number"
+				+ " out of the mask, whatever the threshold (infinite ones still pass).";
+	}
+	return "";
+}
+
 /** Checks that need the image. Returns false to skip this image, not to abort the batch. */
 private boolean validateAgainstImage(ImagePlus imp, int task){
 	boolean ok = true;
 	for(int c = 0; c < channelIDs.length; c++){
 		if(channelIDs [c] > imp.getNChannels()){
-			progress.notifyMessage("Task " + (task+1) + ": settings ask for channel "
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": settings ask for channel "
 				+ channelIDs [c] + " but the image has only " + imp.getNChannels()
 				+ " channel(s). Skipping this image.", ProgressReporter.ERROR);
 			ok = false;
@@ -3010,7 +3167,7 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 				|| chosenAlgorithms [c].equals(SPOT_DETECTION) || ciliaQ_Prep_jnh.local_threshold.PhansalkarSettings.NAME.equals(chosenAlgorithms [c]));
 		
 		if(usesStackChoice && imp.getNSlices() > 1 && chosenStackMethods [c].equals(STACK_NO_STACK)){
-			progress.notifyMessage("Task " + (task+1) + ": stack handling is set to '"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": stack handling is set to '"
 				+ STACK_NO_STACK + "' but the image has " + imp.getNSlices()
 				+ " slices. " + (ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c])
 					? "The FRACTION thresholds will be taken from the whole stack."
@@ -3023,13 +3180,14 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 			 *	hysteresis via the 3D Hysteresis Thresholding plugin, expansion via 26-connected
 			 *	growth - so they need one threshold pair for the whole stack. A different threshold
 			 *	per slice would cut objects at slice boundaries. Say so rather than pool silently. */
-			progress.notifyMessage("Task " + (task+1) + ": stack handling '" + STACK_PER_SLICE
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": stack handling '" + STACK_PER_SLICE
 				+ "' cannot be used with '" + chosenAlgorithms [c] + "', which needs one threshold"
 				+ " for the whole stack because it connects objects across slices."
 				+ " The pooled-histogram threshold is used for this channel instead.",
 				ProgressReporter.NOTIFICATION);
-		}else if(imp.getNSlices() == 1 && !chosenStackMethods [c].equals(STACK_NO_STACK)){
-			progress.notifyMessage("Task " + (task+1) + ": the image is a single slice, so"
+		}else if(usesStackChoice && imp.getNSlices() == 1 && (imp.getNFrames() == 1 || separateTimesteps [c])
+				&& !chosenStackMethods [c].equals(STACK_NO_STACK)){	// one slice, and one frame or frames thresholded separately: every stack handling is the same
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the image is a single slice, so"
 				+ " stack handling '" + chosenStackMethods [c] + "' has no effect.",
 				ProgressReporter.NOTIFICATION);
 		}
@@ -3038,14 +3196,14 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 		 *	slice of the first time step and applies it to every time step. */
 		if(usesStackChoice && imp.getNFrames() > 1 && !separateTimesteps [c] && chosenStackMethods [c].equals(STACK_NO_STACK)
 				&& !ciliaQ_Prep_jnh.fraction_threshold.FractionSettings.isFractionMethod(chosenAlgorithms [c])){
-			progress.notifyMessage("Task " + (task+1) + ": stack handling is '" + STACK_NO_STACK + "' and the time steps are"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": stack handling is '" + STACK_NO_STACK + "' and the time steps are"
 				+ " thresholded together, so the threshold is taken from the first slice of the first time step and applied to"
 				+ " every time step. '" + STACK_POOLED + "' and the maximum-intensity projection pool all time steps.",
 				ProgressReporter.NOTIFICATION);
 		}
 		
 		if(separateTimesteps [c] && imp.getNFrames() == 1){
-			progress.notifyMessage("Task " + (task+1) + ": 'threshold every time step"
+			progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": 'threshold every time step"
 				+ " independently' is on but the image has a single frame.",
 				ProgressReporter.NOTIFICATION);
 		}
@@ -3053,7 +3211,7 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 	if(imp.getBitDepth() == 8){
 		for(int c = 0; c < channelIDs.length; c++){
 			if(divideBackground [c]){
-				progress.notifyMessage("Task " + (task+1) + ": the image is 8-bit and"
+				progress.notifyMessage("Task " + (task+1) + "/" + tasks + ": the image is 8-bit and"
 					+ " divide-by-background produces 32-bit ratios; the dynamic range"
 					+ " available for thresholding is very small.", ProgressReporter.NOTIFICATION);
 			}
@@ -3068,7 +3226,7 @@ private boolean validateAgainstImage(ImagePlus imp, int task){
 private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
 	/*
 	 * The simple keys are always read. The ADVANCED keys are honoured only when
-	 * actually present: if any of them is given, advancedOverride is set so
+	 * actually present: only if all three are given is advancedOverride set, so
 	 * deriveFromRange() will not recompute over the top of it. Without that, a macro
 	 * could not pin sigma/thresholds at all.
 	*/
@@ -4090,8 +4248,8 @@ private void reportMaskMetrics(ImagePlus procImp, ImagePlus origImp, TextCollect
 				+ df3.format(pct) + "	" + origNonZero);
 		
 		/*
-		 * ZERO-INTENSITY LOSS. Written for every channel that kept intensities, so the loss is visible
-		 * in the archived record.
+		 * ZERO-INTENSITY LOSS. Written for every channel with segmented voxels, so the loss is visible in the
+		 * archived record; only with keep intensities can a voxel be written as 0, so the binary styles read 0.
 		 */
 		if(maskVoxelCount != null && c < maskVoxelCount.length && maskVoxelCount [c] > 0){
 			long lost = zeroIntensityVoxelCount [c];
@@ -4193,14 +4351,17 @@ private static boolean isFlat(ImagePlus imp, int frame, int slice) {
 }
 
 /**
- * New in V0.2.1: which parts of a channel that get a threshold of their own
- * carry no signal (isFlat), in the layout of the thresholds, [time
- * step][slice]: one row when time steps are pooled, one entry per row unless
- * per slice. Each such part is reported; the caller then segments nothing
+ * Which parts of a channel that get a threshold of their own  carry no signal (isFlat),
+ * in the layout of the thresholds, [time step][slice]: one row when time steps are pooled,
+ * one entry per row unless per slice. Each such part is reported; the caller then segments nothing
  * there. Only parts whose threshold is taken from and applied to exactly that
  * data are checked: one threshold for the whole channel is covered by the check
  * before segmentation. With per-slice thresholds pooled over several time steps,
  * slice s is checked across all of them, as its threshold comes from all of them.
+ * A CUSTOM threshold has one row per time step even when the time steps are pooled,
+ * so every time step without signal is left empty there too.
+ * 
+ * New in V0.2.1
  */
 private boolean[][] flatParts(ImagePlus imp, int nGroups, int nPerGroup, int channelID, int task,
 		ProgressReporter progress) {
@@ -4267,6 +4428,14 @@ private void segmentUsingSpotDetection(ImagePlus channelImp, ProgressReporter pr
 
 	tp1.append("Spot detection for channel " + channelWriteImp);
 	tp1.append(ss.report().replaceAll("\n$", ""));
+
+	if(keepIntensities){
+		// New in V0.2.1, as for ridge detection and expansion
+		progress.notifyMessage("Channel " + channelWriteImp + ": spot detection writes one voxel of the maximum intensity per spot,"
+				+ " so 'keep intensities' cannot apply to this channel and was ignored for it. Other channels are unaffected.",
+				ProgressReporter.NOTIFICATION);
+		tp1.append("	NOTE	keep-intensities ignored for this channel (one voxel per spot)");
+	}
 	
 	String spotReject = ss.rejectionReason();
 	if(spotReject != null) throw new SettingsRejectedException(spotReject);
@@ -4412,6 +4581,12 @@ private ImagePlus segmentUsingExpansion(ImagePlus channelImp, ProgressReporter p
 	 */
 	boolean seedDark = es.seedSource.equals(ciliaQ_Prep_jnh.expansion.ExpansionSettings.SEED_RIDGE)
 			&& es.toRidgeSettings().darkLine;
+	
+	if(seedDark && CiliaQPrepStatistics.countNonFinite(channelImp) > 0)
+		// New in V0.2.1, as for ridge detection of dark lines
+		throw new SettingsRejectedException(nonFiniteMessage(channelImp, "For dark-line ridge seeds the channel is inverted,"
+				+ " and these voxels would hide every line"));
+	
 	ImagePlus extentImp = channelImp;
 	if (seedDark) {
 		extentImp = invertedCopy(channelImp);
@@ -4681,6 +4856,19 @@ private static double stackMaximum(ImagePlus imp){
 }
 
 /**
+ * The error for a method that cannot work on a channel with NaN/Infinite voxels (CiliaQPrepStatistics.countNonFinite): FRACTION and
+ * PHANSALKAR, whose threshold would become infinite or not a number, and dark lines, whose inverted copy would be
+ * blank. The third segmentation style does not help here, since it acts only when the threshold is applied.
+ * 
+ * New in V0.2.1
+ */
+private static String nonFiniteMessage(ImagePlus imp, String why){
+	return CiliaQPrepStatistics.countNonFinite(imp) + " voxels are not a number or infinite after preprocessing (e.g. 0/0 or x/0 after Divide by"
+			+ " Background, where the background is 0). " + why + ". Divide by Background is not compatible with this method"
+			+ " on such images: try other preprocessing, e.g. Subtract Background.";
+}
+
+/**
  * A copy of a single-channel image with its intensities inverted, so dark lines become bright lines:
  * - Stack maximum - value for every voxel, zero areas included.
  * - For dark lines the maximum is the counterpart of 0 for bright lines.
@@ -4776,6 +4964,12 @@ private ImagePlus segmentUsingRidgeDetection(ImagePlus channelImp, ProgressRepor
 
 	/*	Derive into a copy, so this image never changes the stored settings. */
 	rs = rs.copy();
+	
+	if(rs.darkLine && CiliaQPrepStatistics.countNonFinite(channelImp) > 0) {
+		// See nonFiniteMessage
+		throw new SettingsRejectedException(nonFiniteMessage(channelImp, "For dark lines the channel is inverted,"
+				+ " and these voxels would hide every line"));
+	}		
 	
 	/*	The channel's header and the NaN note come first, before the values are derived. Since a refusal stops the
 	 *	channel at the derivation, the note must already be written by then: a channel of mostly NaN voxels, e.g. after
@@ -5264,7 +5458,10 @@ private void warnOnHysteresisThresholdOrder(double thresholds [][], int channel,
 	String offending = "";
 	int affected = 0;
 	for(int t = 0; t < thresholds.length; t++){
-		if(!(thresholds [t][0] < thresholds [t][1])){		// also catches NaN and low == high
+		if(thresholds [t][1] == Double.POSITIVE_INFINITY) {
+			continue;	// a time step without signal (flatParts): not segmented
+		}
+		if(!(thresholds [t][0] < thresholds [t][1])){	// also catches NaN and low == high
 			affected++;
 			if(affected <= 3){
 				offending += (offending.isEmpty() ? "" : ", ")
@@ -5303,11 +5500,15 @@ private ImagePlus maximumProjection(ImagePlus imp, int startSlice, int endSlice)
 	double maximumAtPos;
 	for(int x = 0; x < imp.getWidth(); x++){
 		for(int y = 0; y < imp.getHeight(); y++){
-			maximumAtPos = 0.0;
+			maximumAtPos = Double.NEGATIVE_INFINITY;	// New in V0.2.1: not 0, which clipped negative 32-bit values
 			for(int z = startSlice-1; z < endSlice; z++){
 				if(imp.getStack().getVoxel(x,y,z) > maximumAtPos){
 					maximumAtPos = imp.getStack().getVoxel(x,y,z);
 				}
+			}
+			if(maximumAtPos == Double.NEGATIVE_INFINITY) {
+				// no number in this column
+				maximumAtPos = imp.getBitDepth() == 32 ? Double.NaN : 0.0;
 			}
 			outImp.getStack().setVoxel(x,y,0,maximumAtPos);
 		}
@@ -5546,10 +5747,15 @@ private boolean requestHysteresisPrefs(String task, int c) {
 	if (gd.wasCanceled()) {
 		return false;
 	}
+	if (gd.invalidNumber()) {
+		// New in V0.2.1, see invalidNumberMessage
+		IJ.error(PLUGIN_NAME, invalidNumberMessage(gd));
+		return false;
+	}
 	return true;
 }
 
-private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String name, boolean multiSeries, int series, ImagePlus imp){
+private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String name, boolean multiSeries, int series){
 	tp.append("Starting date:	" + FullDateFormatter.format(startDate));
 	if(multiSeries) {
 		tp.append("Image name:	" + name + "	series:	" + (series+1));
@@ -5696,8 +5902,9 @@ private void addSettingsBlockToPanel(TextCollector tp, Date startDate, String na
 }
 
 /**	The ridge settings of a settings-file block, shared by RIDGE DETECTION and the seed tool's ridge seeds
- * 	(whose block nests the same labels one level deeper; readIndentedBlock collects both levels). */
-private void readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
+ * 	(whose block nests the same labels one level deeper; readIndentedBlock collects both levels).
+ * 	@return null, or the setting whose choice this version does not know (the caller refuses the file) */
+private String readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings rs){
 	rs.lineWidth = blockDouble(kv, "Expected filament width", rs.lineWidth);
 	rs.sensitivity = blockDouble(kv, "Contrast sensitivity", rs.sensitivity);
 	rs.minLength = blockDouble(kv, "Minimum filament length", rs.minLength);
@@ -5717,23 +5924,25 @@ private void readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jn
 
 	/*
 	 * Z method and clean-up rules. Each label exactly as report() writes it (an
-	 * exact label wins in blockValue); a choice not in the list keeps the default.
+	 * exact label wins in blockValue); a choice not in the list is returned, and the file is refused.
 	 */
 	String zm = blockValue(kv, "Z method");
-	if (zm != null)
-		for (String m : ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.Z_METHODS)
-			if (m.equals(zm.trim()))
-				rs.zMethod = m;
+	if (zm != null) {
+		rs.zMethod = matchName(zm, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.Z_METHODS);
+		if (rs.zMethod == null)
+			return "Z method: " + zm;
+	}
 	rs.copyRule = blockBoolean(kv, "Copy rule", rs.copyRule);
 	rs.copyRatio = blockDouble(kv, "Copy brightness ratio", rs.copyRatio);
 	rs.kinkRule = blockBoolean(kv, "Kink rule", rs.kinkRule);
 	rs.kinkAngle = blockDouble(kv, "Kink angle (degrees)", rs.kinkAngle);
 	rs.branchRule = blockBoolean(kv, "Branch rule", rs.branchRule);
 	String sp = blockValue(kv, "Short pieces");
-	if (sp != null)
-		for (String k : ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_CHOICES)
-			if (k.equals(sp.trim()))
-				rs.shortPieces = k;
+	if (sp != null) {
+		rs.shortPieces = matchName(sp, ciliaQ_Prep_jnh.ridge_detection.RidgeSettings.SHORT_CHOICES);
+		if (rs.shortPieces == null)
+			return "Short pieces: " + sp;
+	}
 	rs.crossingRule = blockBoolean(kv, "Crossing rule", rs.crossingRule);
 	rs.parallelRule = blockBoolean(kv, "Parallel rule", rs.parallelRule);
 	rs.turnRelease = blockBoolean(kv, "Turn release", rs.turnRelease);
@@ -5752,6 +5961,7 @@ private void readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_jn
 		rs.upperThreshold = blockDouble(kv, "Upper threshold", rs.upperThreshold);
 		rs.lowerThreshold = blockDouble(kv, "Lower threshold", rs.lowerThreshold);
 	}
+	return null;
 }
 
 /**	Read a settings sub-block as key/value pairs instead of a fixed line sequence.
@@ -5798,17 +6008,12 @@ private java.util.HashMap<String,String> readIndentedBlock(BufferedReader br) th
 	return kv;
 }
 
-/**	Match a saved threshold-algorithm name against the known list by EXACT equality.
-*	Exact, not contains: "IsoData" is a substring of "IJ_IsoData", and that confusion was already
-*	fixed once in V0.2.0 for the Canny reader. Same trap, same fix. */
-private String matchThrAlgorithm(String saved, String fallback){
+/**	New in V0.2.1: the entry of names that saved equals, ignoring case and surrounding spaces, or null. Exact, not
+ *	contains: "IsoData" is part of "IJ_IsoData". */
+private static String matchName(String saved, String [] names){
 	saved = saved.trim();
-	for(int a = 0; a < ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms.length; a++){
-		if(saved.equalsIgnoreCase(ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms [a]))
-			return ciliaQ_Prep_jnh.expansion.ExpansionSettings.lowThrAlgorithms [a];
-	}
-	IJ.log(PLUGIN_NAME + ": unknown threshold method '" + saved + "', keeping " + fallback);
-	return fallback;
+	for(String n : names)	if(saved.equalsIgnoreCase(n))	return n;
+	return null;
 }
 
 /**	@return the raw value whose key starts with keyPrefix, or null. Prefix matching keeps callers free of
@@ -5899,13 +6104,43 @@ private void warnIfOldReportStays(String path, int task){
 }
 
 /**
- * New in V0.2.1: passes on what must end the whole run, not just one image: a cancelled macro (Esc, or ImageJ stopping a
- * macro after one of its own errors, RuntimeException "Macro canceled") and a stopped thread (ThreadDeath: Abort Macro,
- * the Script Editor's Kill). Called first in every catch that would otherwise go on with the next image.
+ * Passes on what must end the whole run, not just one image or plane: a
+ * cancelled macro (Esc, or ImageJ stopping a macro after one of its own errors,
+ * RuntimeException "Macro canceled") and a stopped thread (ThreadDeath: Abort
+ * Macro, the Script Editor's Kill). Called first in every catch that would
+ * otherwise go on with the next image or plane. ThreadDeath is recognised by
+ * its name: Java 8 throws it in a stopped thread, but from Java 20 on threads
+ * can no longer be stopped and the class is marked for removal. Without a
+ * reference to the class, this compiles without a warning and runs on every
+ * Java version.
+ * 
+ * New in V0.2.1
  */
-private static void rethrowIfRunEnds(Throwable e){
-	if(e instanceof ThreadDeath)	throw (ThreadDeath) e;
-	if(e instanceof RuntimeException && ij.Macro.MACRO_CANCELED.equals(e.getMessage()))	throw (RuntimeException) e;
+public static void rethrowIfRunEnds(Throwable e){
+	if(e.getClass().getName().equals("java.lang.ThreadDeath")) {
+		throw (Error) e;
+	}
+	if(e instanceof RuntimeException && ij.Macro.MACRO_CANCELED.equals(e.getMessage())) {
+		throw (RuntimeException) e;
+	}
+}
+
+/**
+ * New in V0.2.1: closes the images Bio-Formats opened as virtual stacks only to count a file's series, with their readers.
+ * Otherwise each one keeps its file open (on Windows locked) until Fiji ends, one per listed file.
+ */
+private static void closeReaders(ImagePlus [] imps){
+	for(ImagePlus ip : imps){
+		if(ip == null)	continue;
+		try{
+			if(ip.getStack() instanceof loci.plugins.util.BFVirtualStack) {
+				((loci.plugins.util.BFVirtualStack) ip.getStack()).getReader().close();
+			}
+		}catch(Exception e){
+			// the file is then closed when Fiji ends
+		}
+		ip.close();
+	}
 }
 
 /**
@@ -5932,8 +6167,21 @@ private static String stackTraceToString(Throwable e){
 	return sb.toString();
 }
 
+/**
+ * Tells why the run stops before any image is processed: as a dialog, or in a macro or headless run, where
+ * a dialog would hold up the batch or cannot open at all, in the Log.
+ * 
+ * New in V0.2.1
+ */
+private void stopMessage(String message){
+	if(showGUIs && !GraphicsEnvironment.isHeadless())	new WaitForUserDialog(message).show();
+	else	IJ.log(PLUGIN_NAME + ": " + message.replace("\n", " "));
+}
+
 private void stayAwake() {
 	if(robo == null) return;
-	robo.mouseMove(MouseInfo.getPointerInfo().getLocation().x, MouseInfo.getPointerInfo().getLocation().y);
+	java.awt.PointerInfo pointer = MouseInfo.getPointerInfo();	// New in V0.2.1: null without a pointer device
+	if(pointer == null) return;
+	robo.mouseMove(pointer.getLocation().x, pointer.getLocation().y);
 }
 }

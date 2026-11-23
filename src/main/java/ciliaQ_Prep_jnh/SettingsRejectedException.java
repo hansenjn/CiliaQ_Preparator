@@ -20,9 +20,13 @@ package ciliaQ_Prep_jnh;
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
 
-/** A setting that cannot work for this channel or image. 
+/** A setting that cannot work for this channel or image,
+ *	or a number field with no number in a settings dialog.
  *	The message is written for the user and is shown
- *  as it is, without a stack trace. Added in V0.2.1. */
+ *  as it is, without a stack trace.
+ *  
+ *  Added in V0.2.1
+ */
 public class SettingsRejectedException extends Exception {
 	private static final long serialVersionUID = 1L;
 	public SettingsRejectedException(String message) { super(message); }

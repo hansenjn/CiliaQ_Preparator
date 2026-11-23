@@ -21,6 +21,9 @@
  */
 package ciliaQ_Prep_jnh.ij_ridge_detector_steger;
 
+//CiliaQ note: getValue() of MutableInt and MutableDouble is deprecated from commons-lang3 3.18.0 on (the version
+//pom-scijava 43 uses). Kept on purpose: its replacement get() exists only from 3.18.0, and Fiji installations may ship
+//an older commons-lang3 (e.g. 3.17.0), where get() would fail at run time.
 import org.apache.commons.lang3.mutable.MutableDouble;
 import org.apache.commons.lang3.mutable.MutableInt;
 
@@ -883,7 +886,8 @@ public class Link {
 			length = MAX_LINE_EXTENSION;
 			
 			/*	CiliaQ-MOD (modification 11): Width.bresenham writes up to 2 (ceil(length) + 1) points, which is
-			 *	more than ceil(3 length) for sigma below 0.7 (ArrayIndexOutOfBoundsException for original code at sigma 0.6;
+			 *	more than ceil(3 length) for some sigmas below 1, and overflowed it below 0.7
+			 *	(ArrayIndexOutOfBoundsException for original code at sigma 0.6;
 			 *	original code defined max_line as `Math.ceil(length * 3)`).
 			 *	*/
 			max_line = Math.max((int) Math.ceil(length * 3), 2 * ((int) Math.ceil(length) + 1));
@@ -1315,7 +1319,11 @@ public class Link {
 			}
 		}
 
-		for (Line c : cont) {
+		/*	CiliaQ-MOD (modification 14): only the lines found, cont[0, num_cont), as Steger's C code returns them. The split
+		 *	loop above moves the last new piece into a split line's slot (cont[j] = cont[--num_cont]), so that line also
+		 *	stays at cont[num_cont]; reading the whole array returned it twice. Loop before CiliaQ-MOD: for (Line c : cont) */
+		for (int ci = 0; ci < num_cont; ci++) {
+			Line c = cont[ci];
 			if (c != null && c.getContourClass() != null) {
 				c.setFrame(contours.getFrame());
 				contours.add(c);

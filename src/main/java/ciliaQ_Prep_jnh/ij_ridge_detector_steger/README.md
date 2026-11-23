@@ -58,7 +58,7 @@ so the code was copied in and corrected here. See "Modifications" below. The ven
 copy also contained four further bugs. Two of them change which lines are detected and are
 fixed as modifications 8 and 9. The third caused an ArrayIndexOutOfBoundsException for sigma
 values below 0.7 and is fixed as modification 11. The fourth zeroed the responses of long lines
-and is fixed as modification 12.
+and is fixed as modification 12. Modifications 14 and 15 fix three more, found in a later review.
 
 ## Modifications made to the original
 
@@ -71,6 +71,8 @@ and is fixed as modification 12.
   zeroed accumulated response values on lines exceeding the initial buffer size; the fix restores
   correct responses and **changes the output** wherever such reallocation occurred.
 - Modification 13 makes five steps faster on noisy images and leaves the computed lines unchanged.
+- Modification 14 returns each line once (without overlap resolution one line per plane came out twice) and
+  **changes the output** there; modification 15 fixes two junction details of the overlap resolution.
 
 Every modified file carries an inline comment marked `// CiliaQ-MOD:` at the point of change.
 
@@ -78,9 +80,9 @@ Every modified file carries an inline comment marked `// CiliaQ-MOD:` at the poi
 
 The original code produced **non-reproducible results**: the same image with the same
 parameters, in the same Fiji session, could return a different set of detected lines between
-runs on byte-identical input. The cause was several order-dependent constructs: non-total-order comparators, an
-unreset static counter, and (most importantly) iteration over hash collections whose order is
-not defined. These were corrected as listed below. After the fixes, repeated runs — including
+runs on byte-identical input. The cause was iteration over hash collections whose order is not defined, together
+with an unreset static counter (the hash order of line IDs follows it); comparators that kept ties in input order
+passed that order on. These were corrected as listed below. After the fixes, repeated runs — including
 across a full Fiji/JVM restart — produce identical output.
 
 ### Changes
@@ -91,18 +93,17 @@ collide (split-package) with any installed Ridge Detection plugin on the classpa
 *(This rename is specific to vendoring and is NOT part of the upstream fix.)*
 
 2. **`Crossref.compareTo` made a total order** (`Crossref.java`). The original compared only
-`value` and returned 0 for equal values, leaving the sort order of equal-response starting
-points undefined. On low-background images many candidates share the same response, so their
-order after `Arrays.sort` — and hence which starting points the linker picks — was not
-reproducible. Tie-breaking on `x` then `y` makes the ordering fully determined by
-`(value, x, y)`.
+`value` and returned 0 for equal values. `Arrays.sort` is stable, so equal-response starting
+points kept the order in which they were collected. Tie-breaking on `x` then `y` makes the
+ordering depend on `(value, x, y)` alone, whatever that order; for the current collection order
+it is the same order, so the output is unchanged.
 
 3. **`Junction.compareTo` made a total order** (`Junction.java`). The original compared only
-`(cont1, pos)` and returned 0 for junctions sharing both, leaving their order undefined.
-`Arrays.sort(junc)` (in `Link`) and `Collections.sort(resultJunction)` (in `LineDetector`)
-then ordered such ties arbitrarily, and the line-splitting loop (which groups junctions by
-`cont1` and splits a line at each `pos`) could produce a different split — and thus a
-different line count — between runs. Tie-break on `cont2`, then `x`, then `y` to make the
+`(cont1, pos)` and returned 0 for junctions sharing both. `Arrays.sort(junc)` (in `Link`) and
+`Collections.sort(resultJunction)` (in `LineDetector`) are stable, so such ties kept the order
+of the input; where that order varied between runs (hash iteration, modifications 5 and 6), the
+line-splitting loop (which groups junctions by `cont1` and splits a line at each `pos`) could
+produce a different split — and thus a different line count. Tie-break on `cont2`, then `x`, then `y` to make the
 ordering total. The comparisons were also changed from integer subtraction
 (`a - b`, which can overflow) to `Integer.compare` / `Float.compare` (overflow-safe).
 
@@ -122,7 +123,7 @@ in an order determined by the integer values, so the created junctions — and t
 lines — were not reproducible. Changed to `LinkedHashSet<Integer>` (insertion order, which is
 driven by deterministic loops). *(`uniqueIDs` in `fixJunctions` was switched to
 `LinkedHashSet` as well, for consistency, although it is only used for `contains`/`add`.
-`alreadyProcessedJunctionPoints` was left a `HashSet`: it is never iterated.)*
+`alreadyProcessedJunctionPoints` was made a `LinkedHashSet` too, for the same reason.)*
 
 6. **Deterministic collections in overlap resolution** (`SlopeOverlapResolver.java`) — the
 largest source of non-determinism. This resolver runs when `OverlapOption.SLOPE` is used
@@ -161,7 +162,7 @@ original treated every line with a junction at both ends as the overlap area of 
 long, paired its neighbours straight through it, and emitted every proposed merge as its own line.
 One plain ridge came out as 3–4 copies (also in the released 1.4.1), and in tangles one filament was
 routed along another. `resolveByJunctionClusters` replaces the merge step:
-   - line ends on the same junction form a **cluster**;
+   - line ends on junctions less than 2 px apart (in x and in y, also step by step) form a **cluster**;
    - a line between two clusters and at most **4 line widths** long is the **overlap piece** of a
      crossing. Two filaments of width *w* crossing at angle θ overlap over about *w* / sin(θ/2) —
      1.4 widths at 90°, 2.6 at 45°, 3.9 at 30° — so crossings down to about 30° are traced through.
@@ -195,10 +196,11 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    the code worked before. The line extension in `Link.compute_contours` and the width estimation in
    `Width` collect the pixels of a search line of length 2.5 σ with `Width.bresenham`, into a buffer of
    ceil(3 × 2.5 σ) entries. Bresenham writes one pixel per step plus at most one sideways, up to
-   2 (ceil(2.5 σ) + 1) entries, which is more than ceil(3 × 2.5 σ) for σ below 0.7. For σ below 0.7
-   this overflows the buffer; on real images σ 0.6 caused an `ArrayIndexOutOfBoundsException` in
+   2 (ceil(2.5 σ) + 1) entries, which can be more than ceil(3 × 2.5 σ) for σ below 1. For σ below 0.7
+   this overflowed the buffer; on real images σ 0.6 caused an `ArrayIndexOutOfBoundsException` in
    nearly every plane. The buffer now has max(ceil(3 × 2.5 σ),
-   2 (ceil(2.5 σ) + 1)) entries; from σ 0.7 up that is the old size, so the result is unchanged.
+   2 (ceil(2.5 σ) + 1)) entries; a larger buffer changes nothing where the old one sufficed, so the result is
+   unchanged where the code worked.
 
 12. Fixed a **response-array reallocation bug** in the line-linking step (`Link.compute_contours`).
    The original code self-assigned (`resp[o] = resp[o]`)
@@ -212,10 +214,22 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    resolution take one pass. On a plane without signal (about 170,000 lines and 260,000 junctions), one plane then 
    took about 1 minute instead of over 15. On the example images tested and on noise, the output is identical.
 
+14. **Each line returned once** (`Link.java`) — **changes the output** without overlap resolution. The split loop of
+   `compute_contours` moves the last new piece into a split line's slot, so that line also stays at the end of the
+   used part of the array, and the final loop read the whole array: one line per plane came out twice. Now the loop
+   stops at `num_cont`, as Steger's C code does. With overlap resolution (the default) the resolver dropped the copy,
+   so the lines are the same there.
+
+15. **Two junction details of the overlap resolution** (`SlopeOverlapResolver.java`). The key that finds junctions of
+   the same two lines at one point had no separators, so lines 1 and 234 gave the key of lines 12 and 34 there; now
+   it has. And a junction is added to the set of updated junctions once, after both its lines are updated, instead of
+   being changed while in the set. The first changes the output only where such keys collided; the second does not
+   change it (tested with all identity hashes equal).
+
 ### Scope / what was NOT changed
 
 - The detection, width and position-correction mathematics are untouched. Linking is unchanged
-except for the junction sort (8) and the response copy (12); overlap resolution was rebuilt (9) and can take the line width (10);
+except for the junction sort (8), the response copy (12) and the end of the line list (14); overlap resolution was rebuilt (9) and can take the line width (10);
 the search-line buffer fits small sigmas (11); five slow steps are faster, with the same output (13).
 
 ## How CiliaQ sets the thresholds it passes in (not a modification of this code)
@@ -262,8 +276,8 @@ Not a bug; the code comment now says why (`CiliaQ-MOD`, comment only).
 On 2026-10-29, we submitted a **pull request** (determinism fixes, https://github.com/thorstenwagner/ij-ridgedetection/pull/42)
 with the ordering/determinism changes listed under "Modifications made to the original" above.
 
-Modifications 8, 9, 11 and 12 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1; those of 11
-and 12 are in the upstream code this copy was taken from. A second pull request waits until #42 is accepted, since
+Modifications 8, 9, 11, 12, 14 and 15 are **not** reported yet. The bugs of 8 and 9 are also in the released 1.4.1;
+those of 11, 12, 14 and 15 are in the upstream code this copy was taken from. A second pull request waits until #42 is accepted, since
 the plugin is listed as unmaintained.
 
 ## Maintenance note

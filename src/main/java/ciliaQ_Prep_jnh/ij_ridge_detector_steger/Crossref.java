@@ -63,8 +63,8 @@ public class Crossref implements Comparable<Crossref> {
 	    if (this.value > arg0.value) return -1;
 	    if (this.value < arg0.value) return 1;
 	    // CiliaQ-MOD: tie-break on position so the ordering is a TOTAL order and the sort is
-	    // reproducible (equal-response pixels are common on low-background images; without a
-	    // tie-break their order was undefined, giving different line sets between runs).
+	    // independent of the input order (equal-response pixels are common on low-background images; the sort is
+	    // stable, so without a tie-break their order was the order they were collected in).
 	    if (this.x != arg0.x) return Short.compare(this.x, arg0.x);
 	    return Short.compare(this.y, arg0.y);
 	}

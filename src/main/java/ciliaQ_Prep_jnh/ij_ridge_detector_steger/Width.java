@@ -23,6 +23,9 @@ package ciliaQ_Prep_jnh.ij_ridge_detector_steger;
 
 import java.util.ArrayList;
 
+//CiliaQ note: getValue() of MutableInt and MutableDouble is deprecated from commons-lang3 3.18.0 on (the version
+//pom-scijava 43 uses). Kept on purpose: its replacement get() exists only from 3.18.0, and Fiji installations may ship
+//an older commons-lang3 (e.g. 3.17.0), where get() would fail at run time.
 import org.apache.commons.lang3.mutable.MutableDouble;
 import org.apache.commons.lang3.mutable.MutableInt;
 
@@ -489,7 +492,7 @@ public class Width {
 
 		length = 2.5 * sigma;
 		/* CiliaQ-MOD (modification 11): bresenham writes up to 2*(ceil(length)+1) points,
-		 * so more than ceil(3*length) for sigma below 0.7.
+		 * which can be more than ceil(3*length) for sigmas below 1 (an overflow below 0.7).
 		 * Original code defined max_line as ceil(3*length), which could trigger an exception. */
 		max_line = Math.max((int) Math.ceil(length * 3), 2 * ((int) Math.ceil(length) + 1));
 		line = new Offset[max_line];

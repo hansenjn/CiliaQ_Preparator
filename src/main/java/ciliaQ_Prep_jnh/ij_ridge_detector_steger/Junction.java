@@ -62,10 +62,10 @@ public class Junction implements Comparable<Junction> {
 		// return (((this.cont1 - o.cont1) != 0) ? this.cont1 - o.cont1 : this.pos - o.pos); // ORIGINAL CODE
 		
 		// CiliaQ-MOD: total order. The original compared only (cont1, pos) and returned 0 for junctions
-		// sharing both, leaving their order undefined. Arrays.sort(junc) / Collections.sort then ordered
-		// such ties arbitrarily, and the line-splitting loop (which groups by cont1 and splits at pos)
-		// could produce a different split - and thus a different line count - between runs on identical
-		// input. Tie-break on cont2, then x, then y so the ordering is fully determined and reproducible.
+		// sharing both. The sorts are stable, so such ties kept the order of the input, and where that order
+		// varied between runs (hash iteration, modifications 5 and 6), the line-splitting loop (which groups by
+		// cont1 and splits at pos) could produce a different split - and thus a different line count.
+		// Tie-break on cont2, then x, then y so the ordering no longer depends on the input order.
 		if (this.cont1 != o.cont1) return Integer.compare(this.cont1, o.cont1);
 		if (this.pos   != o.pos)   return Integer.compare(this.pos,   o.pos);
 		if (this.cont2 != o.cont2) return Integer.compare(this.cont2, o.cont2);

@@ -28,6 +28,7 @@ import javax.swing.SwingConstants;
 
 import ij.IJ;
 
+@SuppressWarnings("serial") // JFrame is Serializable, but this dialog is never saved or sent, so no serialVersionUID is needed
 public class ProgressDialog extends javax.swing.JFrame implements ActionListener, ProgressReporter{
 	// LinkedLists instead of arrays, for speed
 	private LinkedList<String> dataLeft = new LinkedList<>();
@@ -376,7 +377,7 @@ public class ProgressDialog extends javax.swing.JFrame implements ActionListener
 		if(taskFraction >= 1.0){
 			taskFraction = 0.9;
 		}
-		int newValue = (int)Math.round(((double)(task-1)/tasks)*100.0+taskFraction*(100/tasks));
+		int newValue = (int)Math.round(((double)(task-1)/tasks)*100.0+taskFraction*(100.0/tasks));
 		progressBar.setValue(newValue);
 		updateUITimed();
 	}
@@ -386,7 +387,7 @@ public class ProgressDialog extends javax.swing.JFrame implements ActionListener
 		if(taskFraction > 1.0){
 			taskFraction = 0.9;
 		}
-		int newValue = (int)Math.round(((double)(task-1)/tasks)*100.0+taskFraction*(100/tasks));
+		int newValue = (int)Math.round(((double)(task-1)/tasks)*100.0+taskFraction*(100.0/tasks));
 		progressBar.setValue(newValue);
 		updateUITimed();
 	}

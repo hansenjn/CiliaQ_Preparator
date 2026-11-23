@@ -77,8 +77,14 @@ public class ProcessSettings {
 		inst.lowThr = gd.getNextNumber();
 		inst.highThrAlgorithm = gd.getNextChoice();
 		inst.highThr = gd.getNextNumber();
-		if (gd.wasCanceled())
+		if (gd.wasCanceled()) {
 			throw new Exception("GD canceled by user");
+		}
+		if (gd.invalidNumber()) {
+			// New in V0.2.1: a number field with no number, e.g. "5,5"
+			throw new ciliaQ_Prep_jnh.SettingsRejectedException(ciliaQ_Prep_jnh.CiliaQPrepMain.invalidNumberMessage(gd));
+		}
+			
 		return inst;
 	}
 	
