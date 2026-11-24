@@ -142,8 +142,9 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 	 * filaments that cross through it; (3) joints are proposed between line ends of one cluster, and
 	 * through an overlap piece between its two clusters, scored with the straightCalc measure the
 	 * original used, over the path the joint builds; (4) joints are accepted straightest first, one
-	 * partner per line end, no cycles, at most two filaments through one overlap piece, and only if the
-	 * path bends by at most MAX_BEND_DEG; (5) accepted joints are walked into chains. Every line other
+	 * partner per line end, no cycles, at most two filaments through one overlap piece, one joint for a
+	 * tiny line with both ends in one cluster (modification 21), and only if the path bends by at most
+	 * MAX_BEND_DEG; (5) accepted joints are walked into chains. Every line other
 	 * than an overlap piece ends up in exactly one output line.
 	 */
 	private Lines resolveByJunctionClusters(final Lines lines, final Junctions junctions, final Map<Line, Line> lineMap) {
@@ -331,6 +332,8 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 			if (!joint.containsKey(a)) { joint.put(a, new Integer[2]); root.put(a, a); }
 			if (!joint.containsKey(b)) { joint.put(b, new Integer[2]); root.put(b, b); }
 			if (joint.get(a)[ea] != null || joint.get(b)[eb] != null) continue;				// rule: one partner per line end
+			if (tinyAtOneJunction(clusterOf, a) && joint.get(a)[1 - ea] != null) continue;	// rule (modification 21): a tiny line at one
+			if (tinyAtOneJunction(clusterOf, b) && joint.get(b)[1 - eb] != null) continue;	// junction takes one joint, no path through it
 			if (ins != null && carried.containsKey(ins) && carried.get(ins) >= 2) continue;	// rule: a crossing is two filaments, so at most two through one overlap piece
 			Line ra = a, rb = b;
 			while (root.get(ra) != ra) ra = root.get(ra);	// find root of a's chain
@@ -734,17 +737,7 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 	private float[] findLongestPath(final Line query, int dist, final List<float[]> points) {
 		// p1 is the original point to test
 		final float[] p1 = points.get(0);
-		
-		/*	CiliaQ-MOD (modification 21): a line whose two ends lie within SIGMA of each other (in x and y) gives no
-		 *	approach direction at either end, so it takes no joint (p1 itself is returned: bendDeg of a direction without
-		 *	length is 180). Before CiliaQ-MOD, the test below took its end for its start, so such a line took no joint at
-		 *	its end but one at its start. Allowing both ends instead lets a 2-3 px fragment in a crossing take a joint at
-		 *	each end, each bent up to 60 degrees, and so bridge two filaments. */
-		final float[] qx = query.getXCoordinates(), qy = query.getYCoordinates();
-		final int qn = query.getNumber() - 1;
-		if (Math.abs(qx[0] - qx[qn]) < SIGMA && Math.abs(qy[0] - qy[qn]) < SIGMA)
-			return p1;
-		
+				
 		// Incrementally check the next position
 		dist += SLOPE_DIST;
 
@@ -753,8 +746,13 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 
 		// Determine the position to check based on whether the query line intersects
 		// with p1 at its start or end
-		if (Math.abs(p1[0] - query.getXCoordinates()[0]) < SIGMA
-				&& Math.abs(p1[1] - query.getYCoordinates()[0]) < SIGMA) {
+		/*	CiliaQ-MOD (modification 21): p1 is the start only if it IS the start point; the callers pass an exact end
+		 *	point (getInterceptPoint). Before CiliaQ-MOD: a point within SIGMA of the start counted as the start, so on a
+		 *	line whose two ends lie within SIGMA of each other the end was measured from the start. Its direction then had
+		 *	no length (a bend of 180, no joint), so whether such a line could be joined at an end depended on the direction
+		 *	it had been traced in; on a longer, nearly closed line the end took the start's direction. */
+		final float[] qx = query.getXCoordinates(), qy = query.getYCoordinates();
+		if (p1[0] == qx[0] && p1[1] == qy[0]) {
 			pos = Math.min(dist, query.getNumber() - 1);
 		} else {
 			pos = Math.max(0, query.getNumber() - 1 - dist);
@@ -779,6 +777,17 @@ public class SlopeOverlapResolver extends AbstractOverlapResolver {
 
 		// If the line is not straight enough, return the previous point.
 		return points.get(points.size() - 2);
+	}
+
+	/**
+	 * CiliaQ-MOD (modification 21): a line shorter than 2 line widths whose two ends lie in the same junction cluster, e.g.
+	 * a 2-3 px fragment in a crossing. It takes at most one joint: with a joint at each end, each bent up to MAX_BEND_DEG,
+	 * a path through it could turn by twice that and bridge two filaments. A longer line, e.g. a loop that returns to its
+	 * junction, may take a joint at each end.
+	 */
+	private boolean tinyAtOneJunction(final Map<Line, int[]> clusterOf, final Line l) {
+		final int[] c = clusterOf.get(l);
+		return c != null && c[0] >= 0 && c[0] == c[1] && l.estimateLength() < 2 * lineWidth(l);
 	}
 
 	/** CiliaQ-MOD: the key of a grid cell (x in the high, y in the low 32 bits) */

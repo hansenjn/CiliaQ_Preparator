@@ -25,8 +25,9 @@ import ij.process.ImageProcessor;
  * The rules run in this order (the dialog shows it):
  *   kink      - a turn of at least kinkAngle between the direction over w before a point and over w after it, both
  *               arms at least 2 w long, cuts the line; the two pieces are kept apart (filaments do not kink).
- *   branch    - a line that ends on another line's side (within 1.5 px of it, at least w from that line's ends) is
- *               kept apart from it.
+ *   branch    - a line of at least 2 w that ends on another line's side (within 1.5 px of it, at least w from that
+ *               line's ends) is kept apart from it. A shorter piece is a spur, e.g. a fork at the tip of a filament,
+ *               not the stem of a T: it is left to the short-piece rule.
  *   crossing  - two lines that the overlap resolution traced through the same crossing share points there (within
  *               0.5 px, at least w from both lines' ends): kept apart.
  *   parallel  - two lines that run side by side, 0.5-1.2 w apart and within 20 deg, over at least 2 w of consecutive
@@ -57,7 +58,8 @@ public class RidgeCleanup {
 	public boolean runLineRules = true, runOtherRules = true;
 
 	/** Fixed constants of the rules, in line widths; SHARE, CONTINUITY_BLUR and BRANCH_TOUCH_PX (below) are in px. */
-	static final double KINK_ARM = 2, PAR_MIN = 0.5, PAR_MAX = 1.2, PAR_LEN = 2, SHARE = 0.5, CONTINUITY_BLUR = 1;
+	static final double KINK_ARM = 2, PAR_MIN = 0.5, PAR_MAX = 1.2, PAR_LEN = 2, SHARE = 0.5, CONTINUITY_BLUR = 1,
+			BRANCH_MIN = 2;
 	
 	/** How near counts as touching: a line end at another line's side (branch rule, in px), and a runner's end at the
 	 *  other runner (turn release, in line widths). */
@@ -107,11 +109,19 @@ public class RidgeCleanup {
 	void branches(List<float[][]> out, double w, List<int[]> apart) {
 		Map<Long, List<int[]>> grid = grid(out);
 		for (int a = 0; a < out.size(); a++) {
-			float[][] L = out.get(a); int n = L[0].length; if (n == 0) continue;
+			float[][] L = out.get(a);
+			int n = L[0].length;
+			if (n == 0) {
+				continue;
+			}
+			// a spur (points about 1 px apart: shorter than BRANCH_MIN widths) is no stem of a T
+			if (n < BRANCH_MIN * w) continue;
 			for (int e = 0; e < 2; e++) {
 				int q = e == 0 ? 0 : n - 1;
 				int on = sideOf(out, grid, a, L[0][q], L[1][q], w);
-				if (on < 0) continue;
+				if (on < 0) {
+					continue;
+				}
 				apart.add(new int[] { a, on, BRANCH }); nBranch++;
 			}
 		}

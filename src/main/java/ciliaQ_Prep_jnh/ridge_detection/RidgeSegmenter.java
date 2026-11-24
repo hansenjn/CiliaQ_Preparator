@@ -41,8 +41,8 @@ import ij.process.ShortProcessor;
  *     plane" and "3D" keep each detection only in its in-focus plane and join it to its 3D neighbours; 3D
  *     also pairs the branches of crossings across planes (RidgeZ).
  *  3. CLEAN-UP RULES (RidgeCleanup). Per plane, lines that belong to different filaments -
- *     a line ending on another's side, two lines traced through one crossing, optionally lines running
- *     side by side or the arms of a kink - are kept apart: they are never joined into one object.
+ *     a line of at least 2 widths ending on another's side, two lines traced through one crossing, optionally
+ *     lines running side by side or the arms of a kink - are kept apart: they are never joined into one object.
  *     The minimum length applies to the finished object (its distinct xy positions in classic), so the
  *     short in-focus pieces of a tilted filament are not lost; Steger keeps pieces down to 2 px per plane.
  *  4. CONSECUTIVE LABELS. Final labels are consecutive positive integers from 1, numbered from the
