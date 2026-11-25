@@ -29,7 +29,9 @@ import ij.process.ImageProcessor;
  *               line's ends) is kept apart from it. A shorter piece is a spur, e.g. a fork at the tip of a filament,
  *               not the stem of a T: it is left to the short-piece rule.
  *   crossing  - two lines that the overlap resolution traced through the same crossing share points there (within
- *               0.5 px, at least w from both lines' ends): kept apart.
+ *               0.5 px, at least w from both lines' ends): kept apart. Off by default: where Steger traces one
+ *               filament twice in a plane, the two traces share points too and would be kept apart (seen on short
+ *               filaments such as cilia). For long filaments that cross, such as flagella, switch it on.
  *   parallel  - two lines that run side by side, 0.5-1.2 w apart and within 20 deg, over at least 2 w of consecutive
  *               points, are kept apart - unless they are one folded filament (turn release, or a single line of a
  *               nearby plane running back along both: see dropHairpins).
@@ -51,7 +53,7 @@ public class RidgeCleanup {
 
 	/** Rule switches and parameters, from RidgeSettings. */
 	public double kinkAngle = 0;			// degrees; 0 = kink rule off
-	public boolean branch = true, crossing = true, parallel = false, turnRelease = true;
+	public boolean branch = true, crossing = false, parallel = false, turnRelease = true;
 	public double turnAngle = 25, turnTangent = 2, turnContinuity = 0.9;
 
 	/** Which rules this call runs: 3D reads branch and crossing off the lines as 2D sees them, the rest off its own. */

@@ -248,8 +248,8 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    are filled from their neighbours. The test for "a point with a width follows the gap" was `j < num_points - 1`,
    so a gap that ended right before the last point was handled as a gap to the end: the last point's width was
    overwritten by the one before the gap, or, for a gap from the first point, the widths were filled from 0. Now
-   `j < num_points`. Tested alone on top of modification 16, on the same two stacks: up to a few thousand voxels
-   and a few objects changed.
+   `j < num_points`. Tested alone on top of modification 16, on the same two stacks: up to about a thousand voxels
+   changed, no object.
 
 19. **Width arrays cleared for every line** (`Width.java`, `compute_line_width`) — **changes the output**. The arrays
    of corrections, asymmetries and gradients are allocated once, reused from line to line and set only where a
@@ -271,9 +271,9 @@ routed along another. `resolveByJunctionClusters` replaces the merge step:
    at the same junction takes at most one: with a joint at each end, each bent up to 60°, a path through a 2–3 px
    fragment in a crossing could turn by up to 120° and bridge two filaments. A longer line, e.g. a loop that returns
    to its junction, may take a joint at each end. Tested together with the branch rule in CiliaQ Preparator (pieces
-   shorter than 2 line widths are ignored as branches) on 45 cilia stacks and a stack of crossing filaments: noisy
-   stacks gave about 10 % fewer objects, since fewer short pieces are split off; crossings were resolved as before;
-   and a curl that returns to its junction stays part of its filament.
+   shorter than 2 line widths are ignored as branches) on 29 cilia stacks, 16 stacks of long filaments and a stack of
+   crossing filaments: noisy stacks gave about 10 % fewer objects, since fewer short pieces are split off; crossings
+   were resolved as before; and a curl that returns to its junction stays part of its filament.
 
 Besides these, some comments were polished (wording only, no change to the code).
 

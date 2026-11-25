@@ -24,8 +24,8 @@ import ciliaQ_Prep_jnh.CiliaQPrepStatistics.Numbers;
  * (every plane a line is found in, joined by overlap), 2D in-focus plane (each detection only in its in-focus plane),
  * or 3D (in-focus plane plus pairing of crossing branches across planes). The clean-up rules (RidgeCleanup) then
  * keep lines apart that belong to different filaments: copy (out-of-focus copies, in-focus and 3D only), kink,
- * branch, crossing, parallel with the turn release, in that order. Defaults: in-focus; branch and crossing on;
- * copy, kink and parallel off. On a single plane all three z methods give the same result. Last, once the objects are
+ * branch, crossing, parallel with the turn release, in that order.
+ * On a single plane all three z methods give the same result. Last, once the objects are
  * made, short pieces (within 1 width of a longer object and reaching less than 2 widths from there, such as the forks
  * Steger draws at a broad cilium tip) join that object by default; they can instead be dropped, or kept as objects of
  * their own (RidgeShortPieces; in in-focus and 3D a standing cilium is never a short piece).
@@ -74,6 +74,7 @@ public class RidgeSettings implements Cloneable {
 	/** Clean-up rules, in the order they run (see RidgeCleanup). */
 	public boolean copyRule = false;		// drop out-of-focus copies (in-focus and 3D only)
 	public double copyRatio = 4.0;			// a copy is dropped when a point this much brighter lies in another plane beside it
+	public double copyReach = 1.5;			// ... within this many line widths of it (raise it for copies shifted further sideways)
 	
 	public boolean kinkRule = false;		// cut lines at sharp bends
 	public double kinkAngle = 25.0;			// degrees
@@ -83,7 +84,7 @@ public class RidgeSettings implements Cloneable {
 	public static final String SHORT_JOIN = "join their filament", SHORT_DROP = "drop", SHORT_APART = "keep apart";
 	public static final String [] SHORT_CHOICES = { SHORT_JOIN, SHORT_DROP, SHORT_APART };
 	public String shortPieces = SHORT_JOIN;
-	public boolean crossingRule = true;
+	public boolean crossingRule = false;	// for long filaments that cross; off by default, for short cilia (RidgeCleanup: crossing)
 	public boolean parallelRule = false;
 	public boolean turnRelease = true;		// sub-option of the parallel rule
 
@@ -255,6 +256,8 @@ public class RidgeSettings implements Cloneable {
 			return "ridge detection: the minimum filament length must be 0 or above (got " + IJ.d2s(minLength, 1) + ")";
 		if (copyRule && !(copyRatio > 1.0))
 			return "ridge detection: the copy brightness ratio must be above 1 (got " + IJ.d2s(copyRatio, 2) + ")";
+		if (copyRule && !(copyReach > 0.0))
+			return "ridge detection: the copy reach must be above 0 line widths (got " + IJ.d2s(copyReach, 2) + ")";
 		if (kinkRule && !(kinkAngle > 0.0 && kinkAngle < 180.0))
 			return "ridge detection: the kink angle must lie between 0 and 180 degrees (got " + IJ.d2s(kinkAngle, 1) + ")";
 		if (parallelRule && turnRelease && !(turnAngle > 0.0 && turnAngle < 90.0 && turnTangent > 0.0 && turnContinuity >= 0.0 && turnContinuity <= 1.0))
@@ -342,7 +345,7 @@ public class RidgeSettings implements Cloneable {
 		gd.setInsets(0, 5, 0); gd.addNumericField("Contrast sensitivity (higher = stricter = fewer lines)", inst.sensitivity, 2);
 		gd.setInsets(0, 25, 0); gd.addMessage("Default 8 suits sparse cilia in noisy images. Lower it for clean, high-contrast or densely packed cilia"
 				+ "\n(in a test on different image and cilia types, good values were 0.09 to 16, by data type and resolution).", help);
-		gd.setInsets(0, 5, 0); gd.addNumericField("Min. filament length (px) - set just below shortest real filament", inst.minLength, 1);
+		gd.setInsets(0, 5, 0); gd.addNumericField("Min. filament length (px) - set below shortest real filament", inst.minLength, 1);
 		gd.setInsets(0, 5, 0); gd.addCheckbox("Resolve crossings - trace filaments through crossings instead of ending there", inst.resolveCrossings);
 		gd.setInsets(0, 5, 0); gd.addMessage("(Resolve crossings applies to classic z method only; in-focus always resolves them; 3D pairs crossings across planes itself)", help);		
 		
@@ -354,18 +357,19 @@ public class RidgeSettings implements Cloneable {
 		
 		gd.setInsets(0, 0, 0); gd.addMessage("----- Clean-up detected ridges (separate, remove defocus copies, etc.) -----", sub);
 		
-		gd.setInsets(0, 5, 0); gd.addCheckbox("1 Copy rule - remove defocused artefacts (for in-focus / 3D)     --> brightness ratio", inst.copyRule);
+		gd.setInsets(0, 5, 0); gd.addCheckbox("1 Copy rule - remove defocused artefacts (for in-focus / 3D)  --> brightness ratio | reach (widths)", inst.copyRule);
 		gd.addToSameRow(); gd.addNumericField("", inst.copyRatio, 1);
+		gd.addToSameRow(); gd.addNumericField("|", inst.copyReach, 1);
 		
-		gd.setInsets(0, 5, 0); gd.addCheckbox("2 Kink rule - cut a filament at sharp bend (two filaments connecting)     --> Min angle of kink (degrees)", inst.kinkRule);
+		gd.setInsets(0, 5, 0); gd.addCheckbox("2 Kink rule - cut a filament at sharp bend (two filaments connecting)  --> Min angle of kink (degrees)", inst.kinkRule);
 		gd.addToSameRow(); gd.addNumericField("", inst.kinkAngle, 0);
 		
 		gd.setInsets(0,5,0); gd.addCheckbox("3 Branch rule - keep a filament ending on another's side separate", inst.branchRule);
 		gd.setInsets(0,5,0); gd.addCheckbox("4 Crossing rule - keep filaments that cross separate", inst.crossingRule);
 		gd.setInsets(0,5,0); gd.addCheckbox("5 Parallel rule - split filaments running closely side by side", inst.parallelRule);
-		gd.setInsets(0,25,0); gd.addCheckbox("--> Turn release - keep a folded filament as one (in parallel rule)", inst.turnRelease);
+		gd.setInsets(0,30,0); gd.addCheckbox("--> Turn release - keep a folded filament as one (in parallel rule)", inst.turnRelease);
 		
-		gd.setInsets(0,20,0); gd.addChoice("6 Short pieces (< 2 * fil. width & adjacent; e.g., forks at cilium tip)", SHORT_CHOICES, inst.shortPieces);
+		gd.setInsets(0,0,0); gd.addChoice("     6 Short pieces (<2*width & adjacent; e.g., forks at fil. tip)", SHORT_CHOICES, inst.shortPieces);
 		
 		gd.setInsets(0, 0, 0); gd.addMessage("----- Advanced -----", sub);
 		gd.setInsets(0, 0, 0);
@@ -387,6 +391,7 @@ public class RidgeSettings implements Cloneable {
 
 		inst.copyRule = gd.getNextBoolean();
 		inst.copyRatio = gd.getNextNumber();
+		inst.copyReach = gd.getNextNumber();
 		
 		inst.kinkRule = gd.getNextBoolean();
 		inst.kinkAngle = gd.getNextNumber();
@@ -506,6 +511,7 @@ public class RidgeSettings implements Cloneable {
 		sb.append("		Z method	").append(zMethod).append("\n");
 		sb.append("		Copy rule	").append(copyRule).append("\n");
 		sb.append("		Copy brightness ratio	").append(Numbers.exact(copyRatio, 2)).append("\n");
+		sb.append("		Copy reach (line widths)	").append(Numbers.exact(copyReach, 2)).append("\n");
 		sb.append("		Kink rule	").append(kinkRule).append("\n");
 		sb.append("		Kink angle (degrees)	").append(Numbers.exact(kinkAngle, 1)).append("\n");
 		sb.append("		Branch rule	").append(branchRule).append("\n");

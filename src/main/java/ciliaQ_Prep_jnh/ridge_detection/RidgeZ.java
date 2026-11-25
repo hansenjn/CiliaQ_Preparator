@@ -41,7 +41,8 @@ import ij.process.ImageProcessor;
  *     half-maximum run. Otherwise a point is kept if its plane is the one nearest the peak, or if no aligned detection
  *     lies in a plane closer to it.
  *  3. COPY RULE (optional, with its halo rule). A kept point is an out-of-focus copy when a kept point at least
- *     copyRatio x brighter lies in another plane (up to 4 away), within 1.5 line widths and aligned within 30 deg, on a
+ *     copyRatio x brighter lies in another plane (up to 4 away), within copyReach line widths (default 1.5) and aligned
+ *     within 30 deg, on a
  *     piece at least 3 widths long. A short piece (at most 4 widths) is dropped whole when every point of it has a
  *     brighter partner on a longer piece, in any direction (the out-of-focus halo of a short bright filament).
  *  4. CLEAN-UP RULES (RidgeCleanup) on the kept stretches of each plane: pairs of lines that may never be joined.
@@ -69,7 +70,7 @@ public final class RidgeZ {
 	// fixed constants of the method (in line widths unless stated)
 	static final double COS30 = Math.cos(Math.toRadians(30));
 	static final double PROFILE_DIP = 0.8, PROFILE_TAU = 0.1, PROFILE_LOBES = 3, BROAD = 2, FLAT_LENGTH = 3, Z_DISC = 1;
-	static final double COPY_REACH = 1.5, HALO_LENGTH = 4;
+	static final double HALO_LENGTH = 4;
 	static final int COPY_PLANES = 4;
 	static final double XR = 1, OVERLAP = 6, COHERENCE = 15, KINK = 25, KINK_ARM = 2, SITE_ANGLE = 20, FIT = 3,
 			UNPAIRED = 0.5, BEND = 60, LONG = 4;
@@ -610,14 +611,14 @@ public final class RidgeZ {
 
 	/**
 	 * Copy rule (class doc step 3): drop out-of-focus copies. A kept point is dropped when a kept point at least
-	 * copyRatio x brighter lies in another plane (up to COPY_PLANES away), within COPY_REACH widths, aligned within
+	 * copyRatio x brighter lies in another plane (up to COPY_PLANES away), within copyReach widths, aligned within
 	 * 30 deg, on a piece at least 3 widths long. The halo pass then drops a whole short piece (<= HALO_LENGTH widths)
-	 * when every one of its points has a partner at least copyRatio x brighter, within COPY_REACH, on a longer piece,
+	 * when every one of its points has a partner at least copyRatio x brighter, within copyReach, on a longer piece,
 	 * in any direction. Broad points are exempt from both passes, zone points from the first.
 	 */
 	void copies(boolean[] kept, boolean[] broadPt, int[] zoneOf, Map<Long, List<Integer>> grid) {
 		final int N = P.size();
-		final double cD = COPY_REACH * w, ratio = rs.copyRatio;
+		final double cD = rs.copyReach * w, ratio = rs.copyRatio;
 		final int cDz = COPY_PLANES, gr = (int) Math.ceil(cD / 4) + 1;
 		float[][] I = new float[D][];
 		for (int z = 0; z < D; z++) {

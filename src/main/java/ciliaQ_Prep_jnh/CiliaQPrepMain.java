@@ -12,7 +12,7 @@ package ciliaQ_Prep_jnh;
 * GNU General Public License for more details.
 * 
 * Copyright (C) Jan Niklas Hansen
-* Date: September 29, 2019 (This Version: November 23, 2026)
+* Date: September 29, 2019 (This Version: November 24, 2026)
 *   
 * For any questions please feel free to contact me (jan.hansen@uni-bonn.de).
 * =============================================================================== */
@@ -3409,6 +3409,7 @@ private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_de
 	}
 	rs.copyRule = macroFlag(options, key + "copy-rule");
 	rs.copyRatio = macroDouble(options, key + "copy-ratio", rs.copyRatio);
+	rs.copyReach = macroDouble(options, key + "copy-reach", rs.copyReach);
 	rs.kinkRule = macroFlag(options, key + "kink-rule");
 	rs.kinkAngle = macroDouble(options, key + "kink-angle", rs.kinkAngle);
 	rs.branchRule = !macroFlag(options, key + "no-branch-rule");
@@ -3421,7 +3422,7 @@ private void readRidgeMacro(String options, String key, ciliaQ_Prep_jnh.ridge_de
 			addMacroWarning("unknown value for '" + key + "short-pieces': '" + spTok
 					+ "' (join, drop or apart), keeping " + rs.shortPiecesToken());
 	}
-	rs.crossingRule = !macroFlag(options, key + "no-crossing-rule");
+	rs.crossingRule = macroFlag(options, key + "crossing-rule");
 	rs.parallelRule = macroFlag(options, key + "parallel-rule");
 	rs.turnRelease = !macroFlag(options, key + "no-turn-release");
 	rs.zProfileSmoothing = macroDouble(options, key + "z-smoothing",
@@ -3707,14 +3708,15 @@ private String recordRidge(String key, ciliaQ_Prep_jnh.ridge_detection.RidgeSett
 	if (rs.copyRule)
 		s += key + "copy-rule ";
 	s += key + "copy-ratio=" + Numbers.exact(rs.copyRatio, 3) + " ";
+	s += key + "copy-reach=" + Numbers.exact(rs.copyReach, 3) + " ";
 	if (rs.kinkRule)
 		s += key + "kink-rule ";
 	s += key + "kink-angle=" + Numbers.exact(rs.kinkAngle, 3) + " ";
 	if (!rs.branchRule)
 		s += key + "no-branch-rule ";
 	s += key + "short-pieces=" + rs.shortPiecesToken() + " ";
-	if (!rs.crossingRule)
-		s += key + "no-crossing-rule ";
+	if (rs.crossingRule)
+		s += key + "crossing-rule ";
 	if (rs.parallelRule)
 		s += key + "parallel-rule ";
 	if (!rs.turnRelease)
@@ -6078,6 +6080,7 @@ private String readRidgeBlock(java.util.HashMap<String, String> kv, ciliaQ_Prep_
 	}
 	rs.copyRule = blockBoolean(kv, "Copy rule", rs.copyRule);
 	rs.copyRatio = blockDouble(kv, "Copy brightness ratio", rs.copyRatio);
+	rs.copyReach = blockDouble(kv, "Copy reach (line widths)", rs.copyReach);
 	rs.kinkRule = blockBoolean(kv, "Kink rule", rs.kinkRule);
 	rs.kinkAngle = blockDouble(kv, "Kink angle (degrees)", rs.kinkAngle);
 	rs.branchRule = blockBoolean(kv, "Branch rule", rs.branchRule);

@@ -5,14 +5,13 @@
 	<parent>
 		<groupId>org.scijava</groupId>
 		<artifactId>pom-scijava</artifactId>
-<!--		<version>17.1.1</version>-->
-		<version>43.0.0</version> <!-- Update in V0.2.1-->
+		<version>43.0.0</version>
 		<relativePath />
 	</parent> 
  
  	<artifactId>CiliaQ_Preparator_JNH</artifactId>
  	<groupId>JNH</groupId>
-    <version>0.2.1-SNAPSHOT</version>
+    <version>0.2.1</version>
  
     <name>CiliaQPrep</name>
     <description>An imagej plugin to preprocess images for CiliaQ analysis.</description>
